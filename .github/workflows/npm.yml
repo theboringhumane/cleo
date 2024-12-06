@@ -3,7 +3,7 @@ name: 🚀 NPM Publish
 on:
   push:
     branches:
-      - main
+      - master
     paths:
       - 'packages/core/**'
       - '!packages/core/README.md'
