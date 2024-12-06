@@ -1,6 +1,6 @@
 {
   "name": "@cleotasks/core",
-  "version": "1.0.0",
+  "version": "1.0.0-beta.1",
   "description": "A distributed task queue system for Node.js, inspired by Celery",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
