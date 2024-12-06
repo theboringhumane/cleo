@@ -2,9 +2,7 @@ name: 🚀 Publish to NPM
 
 on:
   release:
-    types: [created, edited]
-  push:
-    branches: [master]
+    types: [created]
 
 jobs:
   build:
