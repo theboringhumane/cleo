@@ -1,0 +1,96 @@
+version: '3.8'
+
+services:
+  core:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
+    command: bun run start:core
+    ports:
+      - "3001:3001"
+    environment:
+      - NODE_ENV=production
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - LOG_LEVEL=info
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - cleo-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+  dashboard:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
+    command: bun run start:dashboard
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - CORE_API_URL=http://core:3001
+      - LOG_LEVEL=info
+    depends_on:
+      core:
+        condition: service_healthy
+    networks:
+      - cleo-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+  docs:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
+    command: bun run start:docs
+    ports:
+      - "3002:3002"
+    environment:
+      - NODE_ENV=production
+      - LOG_LEVEL=info
+    networks:
+      - cleo-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3002/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-cleosecret}
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    environment:
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-cleosecret}
+    networks:
+      - cleo-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-cleosecret}", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+    restart: unless-stopped
+
+networks:
+  cleo-network:
+    driver: bridge
+volumes:
+  redis-data:
+    name: cleo-redis-data
