@@ -1,0 +1,400 @@
+---
+title: API Reference
+description: Complete API documentation for Cleo, including configuration options, task definitions, worker settings, and monitoring capabilities.
+excerpt: "Dive into Cleo's comprehensive API documentation. From basic task definitions to advanced configuration options, this reference guide covers everything you need to build powerful distributed task processing systems."
+---
+
+# 📚 API Reference - The Complete Cleo Cookbook
+
+Welcome to the comprehensive API reference for Cleo! 🎯 Here you'll find detailed documentation for every method, option, and feature available in Cleo.
+
+## 🎯 Core API
+
+### cleo.configure()
+Configure the Cleo instance with global options.
+
+```typescript
+interface CleoConfig {
+  broker: BrokerConfig;
+  workers: WorkerConfig;
+  monitoring?: MonitoringConfig;
+  logging?: LoggingConfig;
+  plugins?: PluginConfig[];
+}
+
+// Example usage
+cleo.configure({
+  broker: {
+    type: 'redis',
+    url: process.env.REDIS_URL,
+    options: {
+      tls: true,
+      maxRetriesPerRequest: 3
+    }
+  },
+  workers: {
+    concurrency: 5,
+    maxMemory: '1GB',
+    gracefulShutdown: true
+  },
+  monitoring: {
+    enabled: true,
+    metrics: true,
+    dashboard: {
+      port: 3000
+    }
+  },
+  logging: {
+    level: 'info',
+    format: 'json'
+  }
+});
+```
+
+### @cleo.task Decorator
+Define a task with various options.
+
+```typescript
+interface TaskOptions {
+  name?: string;
+  queue?: string;
+  priority?: TaskPriority;
+  retries?: number;
+  timeout?: number | string;
+  backoff?: BackoffOptions;
+  idempotency?: IdempotencyOptions;
+  schedule?: ScheduleOptions;
+  dependencies?: string[];
+  onSuccess?: (result: any) => Promise<void>;
+  onError?: (error: Error) => Promise<void>;
+  middleware?: TaskMiddleware[];
+}
+
+// Example usage
+@cleo.task({
+  name: 'process-order',
+  queue: 'orders',
+  priority: TaskPriority.HIGH,
+  retries: 3,
+  timeout: '5m',
+  backoff: {
+    type: 'exponential',
+    initialDelay: 1000,
+    maxDelay: 30000
+  }
+})
+async function processOrder(orderId: string) {
+  logger.info('Processing order', {
+    fileName: 'api/tasks.ts',
+    lineNo: 50,
+    functionName: 'processOrder',
+    variable: 'orderId',
+    value: orderId
+  });
+}
+```
+
+### Task Enqueuing Methods
+
+#### cleo.enqueue()
+Enqueue a single task.
+
+```typescript
+interface EnqueueOptions {
+  delay?: number | string;
+  priority?: TaskPriority;
+  idempotencyKey?: string;
+  context?: Record<string, any>;
+}
+
+// Example usage
+const taskId = await cleo.enqueue('process-order', '12345', {
+  delay: '5m',
+  priority: TaskPriority.HIGH
+});
+
+logger.info('Task enqueued', {
+  fileName: 'api/enqueue.ts',
+  lineNo: 75,
+  functionName: 'enqueueOrder',
+  variable: 'taskId',
+  value: taskId
+});
+```
+
+#### cleo.enqueueBatch()
+Enqueue multiple tasks at once.
+
+```typescript
+interface BatchTask {
+  name: string;
+  data: any[];
+  options?: EnqueueOptions;
+}
+
+// Example usage
+const tasks: BatchTask[] = orders.map(order => ({
+  name: 'process-order',
+  data: [order.id],
+  options: { priority: TaskPriority.NORMAL }
+}));
+
+const results = await cleo.enqueueBatch(tasks);
+```
+
+### Queue Management
+
+#### cleo.getQueue()
+Get a queue instance for direct manipulation.
+
+```typescript
+const queue = await cleo.getQueue('orders');
+const stats = await queue.getStats();
+
+logger.info('Queue stats', {
+  fileName: 'api/queues.ts',
+  lineNo: 100,
+  functionName: 'getQueueStats',
+  variable: 'stats',
+  value: stats
+});
+```
+
+### Worker Management
+
+#### cleo.worker
+Access and configure worker behavior.
+
+```typescript
+interface WorkerConfig {
+  concurrency: number;
+  maxMemory?: string | number;
+  gracefulShutdown?: boolean;
+  pollingInterval?: number;
+  errorHandler?: (error: Error) => Promise<void>;
+}
+
+// Example usage
+cleo.worker.configure({
+  concurrency: 5,
+  maxMemory: '1GB',
+  pollingInterval: 1000,
+  errorHandler: async (error) => {
+    logger.error('Worker error', {
+      fileName: 'api/workers.ts',
+      lineNo: 125,
+      functionName: 'errorHandler',
+      variable: 'error',
+      value: error.message
+    });
+  }
+});
+```
+
+### Monitoring & Metrics
+
+#### cleo.getMetrics()
+Get system-wide metrics.
+
+```typescript
+interface Metrics {
+  queues: QueueMetrics[];
+  workers: WorkerMetrics[];
+  tasks: TaskMetrics;
+  system: SystemMetrics;
+}
+
+// Example usage
+const metrics = await cleo.getMetrics();
+logger.info('System metrics', {
+  fileName: 'api/metrics.ts',
+  lineNo: 150,
+  functionName: 'getMetrics',
+  variable: 'metrics',
+  value: {
+    activeWorkers: metrics.workers.length,
+    pendingTasks: metrics.tasks.pending,
+    completedTasks: metrics.tasks.completed
+  }
+});
+```
+
+### Plugin System
+
+#### cleo.use()
+Register plugins or middleware.
+
+```typescript
+interface CleoPlugin {
+  name: string;
+  version: string;
+  setup: (cleo: Cleo) => Promise<void>;
+  teardown?: () => Promise<void>;
+}
+
+// Example usage
+const monitoringPlugin: CleoPlugin = {
+  name: 'cleo-monitoring',
+  version: '1.0.0',
+  setup: async (cleo) => {
+    logger.info('Setting up monitoring', {
+      fileName: 'api/plugins.ts',
+      lineNo: 175,
+      functionName: 'setup',
+      variable: 'plugin',
+      value: 'cleo-monitoring'
+    });
+    // Setup logic
+  }
+};
+
+cleo.use(monitoringPlugin);
+```
+
+## 🎯 Task-Specific APIs
+
+### Task States
+```typescript
+enum TaskState {
+  PENDING = 'pending',
+  RUNNING = 'running',
+  COMPLETED = 'completed',
+  FAILED = 'failed',
+  RETRYING = 'retrying',
+  CANCELLED = 'cancelled'
+}
+
+// Get task state
+const state = await cleo.getTaskState(taskId);
+```
+
+### Task Progress
+```typescript
+interface TaskProgress {
+  percentage: number;
+  current: number;
+  total: number;
+  eta?: number;
+  message?: string;
+}
+
+// Update progress
+@cleo.task({
+  enableProgress: true
+})
+async function longRunningTask() {
+  this.updateProgress({
+    percentage: 50,
+    current: 5,
+    total: 10,
+    message: 'Halfway there!'
+  });
+}
+```
+
+### Task Events
+```typescript
+enum TaskEvent {
+  STARTED = 'started',
+  COMPLETED = 'completed',
+  FAILED = 'failed',
+  PROGRESS = 'progress',
+  RETRY = 'retry'
+}
+
+// Subscribe to task events
+cleo.on(TaskEvent.COMPLETED, (task) => {
+  logger.info('Task completed', {
+    fileName: 'api/events.ts',
+    lineNo: 200,
+    functionName: 'onTaskComplete',
+    variable: 'taskId',
+    value: task.id
+  });
+});
+```
+
+## 🎯 Advanced APIs
+
+### Custom Serializers
+```typescript
+interface Serializer {
+  serialize: (data: any) => string | Buffer;
+  deserialize: (data: string | Buffer) => any;
+}
+
+// Example custom serializer
+const protobufSerializer: Serializer = {
+  serialize: (data) => protobuf.encode(data),
+  deserialize: (data) => protobuf.decode(data)
+};
+```
+
+### Circuit Breaker
+```typescript
+interface CircuitBreakerOptions {
+  threshold: number;
+  timeout: number | string;
+  halfOpenAfter: number | string;
+  onStateChange?: (state: CircuitState) => void;
+}
+
+// Example usage
+@cleo.task({
+  circuitBreaker: {
+    threshold: 5,
+    timeout: '1m',
+    onStateChange: (state) => {
+      logger.info('Circuit breaker state changed', {
+        fileName: 'api/circuit-breaker.ts',
+        lineNo: 225,
+        functionName: 'onStateChange',
+        variable: 'state',
+        value: state
+      });
+    }
+  }
+})
+async function protectedTask() {
+  // Protected task logic
+}
+```
+
+## 🎯 Testing APIs
+
+### TestTaskRunner
+```typescript
+import { TestTaskRunner } from '@cleotasks/testing';
+
+// Example test
+describe('Task Testing', () => {
+  it('should process task correctly', async () => {
+    const runner = new TestTaskRunner();
+    
+    const result = await runner.runTask(processOrder, '12345');
+    
+    expect(result.status).toBe('completed');
+    expect(result.output).toBeDefined();
+  });
+});
+```
+
+## 🎯 Utility APIs
+
+### Task Helpers
+```typescript
+// Compose multiple tasks
+const workflow = cleo.compose([task1, task2, task3]);
+
+// Chain tasks
+const chain = cleo.chain()
+  .add(task1)
+  .add(task2)
+  .add(task3)
+  .build();
+
+// Parallel execution
+const parallel = cleo.parallel([task1, task2, task3]);
+```
+
+Remember: This is a living document! Check our [GitHub repository](https://github.com/yourusername/cleo) for the latest updates and additions to the API. 🚀 

@@ -1,0 +1,229 @@
+---
+title: Quick Start Guide
+description: Get started with Cleo in minutes. Learn how to install, configure and run your first distributed task.
+---
+
+# ⚡ Quick Start - Zero to Hero in 5 Minutes!
+
+Welcome, speed demon! 🏎️ Let's get you up and running with Cleo faster than you can say "distributed task processing"! 
+
+## 🚀 The Speed Run
+
+```bash
+# 1. Create your project
+mkdir task-master-3000
+cd task-master-3000
+
+# 2. Initialize with style
+npm init -y
+
+# 3. Install the good stuff
+npm install @cleotasks/core @cleotasks/worker @cleotasks/redis
+```
+
+## 🎮 Your First Task (Speed Run Edition)
+
+```typescript
+// src/tasks/first-task.ts
+import { cleo } from '@cleotasks/core';
+
+// The simplest task in the west
+@cleo.task({
+  name: 'howdy-task'
+})
+async function sayHowdy(name: string) {
+  logger.info('Greeting user', {
+    fileName: 'tasks/first-task.ts',
+    lineNo: 10,
+    functionName: 'sayHowdy',
+    variable: 'name',
+    value: name
+  });
+  return `Howdy, ${name}! 🤠`;
+}
+
+// Let's make it do something cool
+@cleo.task({
+  name: 'number-cruncher',
+  queue: 'math',
+  retries: 3
+})
+async function crunchNumbers(x: number, y: number) {
+  logger.info('Crunching numbers', {
+    fileName: 'tasks/first-task.ts',
+    lineNo: 25,
+    functionName: 'crunchNumbers',
+    variable: 'inputs',
+    value: { x, y }
+  });
+  
+  // Simulate some intense calculation
+  await new Promise(resolve => setTimeout(resolve, 1000));
+  return x * y * Math.PI; // Because PI makes everything better!
+}
+```
+
+## 🎯 Configure & Launch
+
+```typescript
+// src/config.ts
+import { cleo } from '@cleotasks/core';
+
+logger.info('Launching Cleo', {
+  fileName: 'config.ts',
+  lineNo: 5,
+  functionName: 'configureCleo',
+  variable: 'timestamp',
+  value: new Date().toISOString()
+});
+
+cleo.configure({
+  broker: {
+    type: 'redis',
+    url: 'redis://localhost:6379'
+  },
+  workers: {
+    concurrency: 3, // Three's company!
+    autoStart: true
+  }
+});
+```
+
+## 🎨 Let's Get Tasks Running!
+
+```typescript
+// src/index.ts
+import { cleo } from '@cleotasks/core';
+import './tasks/first-task';
+
+async function runSomeTasks() {
+  logger.info('Starting task demo', {
+    fileName: 'index.ts',
+    lineNo: 15,
+    functionName: 'runSomeTasks',
+    variable: 'mode',
+    value: 'demo'
+  });
+
+  // Queue up some tasks
+  const results = await Promise.all([
+    cleo.enqueue('howdy-task', 'Task Master'),
+    cleo.enqueue('number-cruncher', 42, 123)
+  ]);
+
+  console.log('🎉 Tasks are running! Check these out:', results);
+}
+
+runSomeTasks().catch(console.error);
+```
+
+## 🏃‍♂️ Run It!
+
+```bash
+# Terminal 1: Start Redis (if not running)
+redis-server
+
+# Terminal 2: Start your worker
+npx ts-node src/index.ts
+```
+
+## 🎨 Spice It Up (Optional but Fun!)
+
+### Add Some Priority
+```typescript
+@cleo.task({
+  priority: TaskPriority.HIGH,
+  queue: 'vip'
+})
+async function veryImportantTask() {
+  logger.info('VIP task running', {
+    fileName: 'tasks/vip.ts',
+    lineNo: 30,
+    functionName: 'veryImportantTask',
+    variable: 'importance',
+    value: 'extremely high'
+  });
+  return '⭐ VIP task completed!';
+}
+```
+
+### Add Progress Tracking
+```typescript
+@cleo.task({
+  name: 'progress-master',
+  enableProgress: true
+})
+async function trackProgress() {
+  const steps = 5;
+  for (let i = 1; i <= steps; i++) {
+    logger.info('Task progress', {
+      fileName: 'tasks/progress.ts',
+      lineNo: 45,
+      functionName: 'trackProgress',
+      variable: 'step',
+      value: `${i}/${steps}`
+    });
+    
+    await new Promise(r => setTimeout(r, 1000));
+    this.updateProgress((i / steps) * 100);
+  }
+}
+```
+
+## 🎯 Quick Tips
+
+1. **Task Status Checking**
+```typescript
+const taskId = await cleo.enqueue('your-task');
+const status = await cleo.getTaskStatus(taskId);
+console.log(`Task is ${status}`); // 'completed', 'failed', etc.
+```
+
+2. **Delayed Tasks**
+```typescript
+await cleo.enqueue('reminder-task', { message: 'Take a break!' }, {
+  delay: '1h' // Runs after 1 hour
+});
+```
+
+3. **Batch Processing**
+```typescript
+const tasks = ['task1', 'task2', 'task3'];
+await cleo.enqueueBatch(tasks.map(t => ({
+  name: 'process-item',
+  data: [t]
+})));
+```
+
+## 🎮 Monitor Your Tasks
+
+```typescript
+// Quick health check
+const health = await cleo.getHealth();
+logger.info('System health', {
+  fileName: 'monitor.ts',
+  lineNo: 60,
+  functionName: 'checkHealth',
+  variable: 'status',
+  value: {
+    queues: health.queues + ' 📬',
+    workers: health.workers + ' 👷',
+    tasks: health.tasks + ' 📋'
+  }
+});
+```
+
+## 🎉 What's Next?
+
+Congratulations! You're now a Cleo apprentice! 🧙‍♂️ Here's what to explore next:
+- [Advanced Task Options](./task-options) - Make your tasks even more powerful
+- [Priority Queues](./priority-queues) - Some tasks are more equal than others
+- [Error Handling](./error-handling) - Because stuff happens!
+
+## 🤔 Need Help?
+
+- Join our [Discord](https://discord.gg/cleo) - We don't bite!
+- Check the [FAQ](./faq) - Someone probably had the same question
+- Tweet us [@cleotasks](https://twitter.com/cleotasks) - We love GIFs!
+
+Remember: The journey of a thousand tasks begins with a single queue! 🚀 

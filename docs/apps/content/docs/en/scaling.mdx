@@ -1,0 +1,387 @@
+---
+title: Scaling Guide
+description: Learn how to scale Cleo from handling thousands to millions of tasks. Comprehensive guide on vertical and horizontal scaling strategies.
+excerpt: "Scale your Cleo deployment from handling thousands to millions of tasks. This comprehensive guide covers vertical and horizontal scaling strategies, load balancing, resource management, and real-world scaling patterns."
+---
+
+# 🚀 Scaling Guide - Taking Cleo to the Moon!
+
+Welcome to the Cleo scaling guide! Whether you're processing thousands or millions of tasks, we've got you covered. Let's turn your Cleo deployment into a task-processing powerhouse! 💪
+
+## 🎯 Understanding Scaling Dimensions
+
+### 1. Vertical Scaling (Scaling Up) 📈
+
+```typescript
+// Optimize single worker performance
+cleo.configure({
+  workers: {
+    concurrency: 10,        // Increase concurrent tasks
+    maxMemory: '4GB',       // More memory per worker
+    batchSize: 100,         // Larger batch processing
+    optimizeFor: 'memory'   // Memory optimization
+  }
+});
+
+logger.info('Worker configuration', {
+  fileName: 'scaling/worker.ts',
+  lineNo: 10,
+  functionName: 'configureWorker',
+  variable: 'config',
+  value: {
+    concurrency: 10,
+    maxMemory: '4GB'
+  }
+});
+```
+
+### 2. Horizontal Scaling (Scaling Out) 🌐
+
+```typescript
+// Distributed worker configuration
+cleo.configure({
+  cluster: {
+    enabled: true,
+    name: 'production-cluster',
+    nodes: [
+      { host: 'worker-1', port: 6379 },
+      { host: 'worker-2', port: 6379 },
+      { host: 'worker-3', port: 6379 }
+    ]
+  }
+});
+
+logger.info('Cluster configuration', {
+  fileName: 'scaling/cluster.ts',
+  lineNo: 25,
+  functionName: 'configureCluster',
+  variable: 'nodes',
+  value: 'Configured 3 nodes'
+});
+```
+
+## 🔄 Load Balancing Strategies
+
+### 1. Round Robin (Default)
+
+```typescript
+cleo.configure({
+  loadBalancing: {
+    strategy: 'round-robin',
+    healthCheck: {
+      interval: '10s',
+      timeout: '2s'
+    }
+  }
+});
+```
+
+### 2. Least Connections
+
+```typescript
+cleo.configure({
+  loadBalancing: {
+    strategy: 'least-connections',
+    maxConnectionsPerNode: 1000
+  }
+});
+```
+
+### 3. Consistent Hashing
+
+```typescript
+cleo.configure({
+  loadBalancing: {
+    strategy: 'consistent-hash',
+    hashKey: (task) => task.groupId // Tasks with same groupId go to same worker
+  }
+});
+```
+
+## 📊 Resource Management
+
+### 1. Memory Management
+
+```typescript
+// Memory-aware task processing
+@cleo.task({
+  name: 'memory-intensive-task',
+  resources: {
+    memory: {
+      min: '512MB',
+      max: '1GB',
+      onExhaustion: 'pause'
+    }
+  }
+})
+async function processLargeDataset() {
+  logger.info('Starting memory-intensive task', {
+    fileName: 'scaling/memory.ts',
+    lineNo: 50,
+    functionName: 'processLargeDataset',
+    variable: 'memoryUsage',
+    value: process.memoryUsage().heapUsed
+  });
+  
+  // Memory-efficient processing
+  const stream = createProcessingStream();
+  await processInChunks(stream, 1000);
+}
+```
+
+### 2. CPU Management
+
+```typescript
+// CPU-aware configuration
+cleo.configure({
+  workers: {
+    cpuThreshold: 80, // Pause accepting new tasks at 80% CPU
+    autoScale: {
+      enabled: true,
+      metric: 'cpu',
+      target: 70,
+      min: 1,
+      max: 10
+    }
+  }
+});
+```
+
+## 🌟 High Availability Setup
+
+### 1. Redis Sentinel Configuration
+
+```typescript
+cleo.configure({
+  broker: {
+    type: 'redis',
+    sentinel: {
+      masters: ['mymaster'],
+      nodes: [
+        { host: 'sentinel-1', port: 26379 },
+        { host: 'sentinel-2', port: 26379 },
+        { host: 'sentinel-3', port: 26379 }
+      ],
+      password: process.env.REDIS_PASSWORD
+    }
+  }
+});
+
+logger.info('Sentinel configuration', {
+  fileName: 'scaling/ha.ts',
+  lineNo: 75,
+  functionName: 'configureSentinel',
+  variable: 'status',
+  value: 'Sentinel configured with 3 nodes'
+});
+```
+
+### 2. Redis Cluster Configuration
+
+```typescript
+cleo.configure({
+  broker: {
+    type: 'redis-cluster',
+    nodes: [
+      { host: 'redis-1', port: 6379 },
+      { host: 'redis-2', port: 6379 },
+      { host: 'redis-3', port: 6379 }
+    ],
+    options: {
+      maxRedirections: 16,
+      retryDelayOnFailover: 100
+    }
+  }
+});
+```
+
+## 🚀 Performance Optimization
+
+### 1. Task Batching
+
+```typescript
+@cleo.task({
+  batch: {
+    size: 1000,
+    timeout: '30s',
+    compression: true
+  }
+})
+async function batchProcessor(items: any[]) {
+  logger.info('Processing batch', {
+    fileName: 'scaling/batch.ts',
+    lineNo: 100,
+    functionName: 'batchProcessor',
+    variable: 'batchSize',
+    value: items.length
+  });
+  
+  // Process in smaller chunks
+  const chunks = _.chunk(items, 100);
+  await Promise.all(chunks.map(processChunk));
+}
+```
+
+### 2. Connection Pooling
+
+```typescript
+cleo.configure({
+  broker: {
+    pool: {
+      min: 5,
+      max: 20,
+      acquireTimeout: 10000,
+      idleTimeout: 60000
+    }
+  }
+});
+```
+
+## 📈 Monitoring at Scale
+
+### 1. Metrics Collection
+
+```typescript
+cleo.configure({
+  monitoring: {
+    metrics: {
+      prometheus: {
+        enabled: true,
+        port: 9090,
+        path: '/metrics'
+      },
+      custom: {
+        handler: async (metrics) => {
+          logger.info('Custom metrics', {
+            fileName: 'scaling/metrics.ts',
+            lineNo: 125,
+            functionName: 'collectMetrics',
+            variable: 'metrics',
+            value: metrics
+          });
+        }
+      }
+    }
+  }
+});
+```
+
+### 2. Health Checks
+
+```typescript
+// Implement comprehensive health checks
+async function healthCheck() {
+  const health = await cleo.getClusterHealth();
+  
+  logger.info('Cluster health', {
+    fileName: 'scaling/health.ts',
+    lineNo: 150,
+    functionName: 'healthCheck',
+    variable: 'status',
+    value: {
+      nodes: health.nodes.map(n => ({
+        id: n.id,
+        status: n.isHealthy ? '✅' : '❌'
+      })),
+      queues: health.queues.map(q => ({
+        name: q.name,
+        size: q.size,
+        processing: q.processing
+      }))
+    }
+  });
+  
+  return health;
+}
+```
+
+## 🎯 Scaling Checklist
+
+1. **Pre-scaling Assessment**
+   - [ ] Monitor current resource usage
+   - [ ] Identify bottlenecks
+   - [ ] Set performance baselines
+
+2. **Infrastructure Setup**
+   - [ ] Configure Redis Sentinel/Cluster
+   - [ ] Set up load balancers
+   - [ ] Implement monitoring
+
+3. **Application Configuration**
+   - [ ] Optimize worker settings
+   - [ ] Configure connection pools
+   - [ ] Set up batching
+
+4. **Monitoring Setup**
+   - [ ] Configure metrics collection
+   - [ ] Set up alerting
+   - [ ] Implement logging
+
+## 🚨 Common Pitfalls
+
+1. **Memory Leaks**
+
+```typescript
+// ❌ Bad: Memory leak
+let cache = [];
+@cleo.task()
+async function leakyTask() {
+  cache.push(await fetchData()); // Memory leak!
+}
+
+// ✅ Good: Proper cleanup
+@cleo.task()
+async function efficientTask() {
+  const data = await fetchData();
+  await processData(data);
+  // Data is garbage collected
+}
+```
+
+2. **Connection Exhaustion**
+
+```typescript
+// ❌ Bad: New connection per task
+@cleo.task()
+async function connectionHungryTask() {
+  const client = new Redis(); // Don't do this!
+}
+
+// ✅ Good: Connection pool
+const pool = createConnectionPool();
+@cleo.task()
+async function efficientTask() {
+  const client = await pool.acquire();
+  try {
+    await processData(client);
+  } finally {
+    await pool.release(client);
+  }
+}
+```
+
+## 🎯 Best Practices
+
+1. **Gradual Scaling**
+   - Start small and scale gradually
+   - Monitor impact of changes
+   - Use canary deployments
+
+2. **Resource Management**
+   - Implement proper cleanup
+   - Use connection pooling
+   - Monitor memory usage
+
+3. **Error Handling**
+   - Implement circuit breakers
+   - Use proper retry strategies
+   - Monitor error rates
+
+4. **Performance Monitoring**
+   - Track key metrics
+   - Set up alerts
+   - Regular performance reviews
+
+Remember: Scaling is a journey, not a destination. Start small, measure everything, and scale based on real needs! 🚀
+
+Need help with scaling? Join our [Discord community](https://discord.gg/cleo) for expert advice! 💪 
