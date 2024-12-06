@@ -7,8 +7,11 @@ on:
     paths:
       - 'packages/core/**'
       - '!packages/core/README.md'
-      - '!packages/core/*.test.ts'
-      - '!packages/core/*.spec.ts'
+      - '!packages/core/__tests__/**'
+      - '!packages/core/**/*.test.ts'
+      - '!packages/core/**/*.spec.ts'
+      - '!packages/core/coverage/**'
+      - '!packages/core/jest.config.ts'
 
 jobs:
   publish:
