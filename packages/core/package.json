@@ -1,5 +1,5 @@
 {
-  "name": "@cleo/core",
+  "name": "@cleotasks/core",
   "version": "1.0.0",
   "description": "A distributed task queue system for Node.js, inspired by Celery",
   "main": "dist/index.js",
@@ -70,5 +70,8 @@
   },
   "engines": {
     "node": ">=16.0.0"
+  },
+  "directories": {
+    "example": "examples"
   }
-} 
+}
