@@ -1,4 +1,4 @@
-import { cleo } from '../src';
+import { cleo } from "@cleotasks/core/dist/src/index";
 
 // Configure Cleo with Redis connection
 cleo.configure({

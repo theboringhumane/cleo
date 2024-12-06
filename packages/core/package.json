@@ -1,24 +1,24 @@
 {
   "name": "@cleotasks/core",
-  "version": "1.0.0-beta.1",
+  "version": "1.0.0-beta.3",
   "description": "A distributed task queue system for Node.js, inspired by Celery",
   "main": "dist/index.js",
-  "types": "dist/index.d.ts",
+  "types": "dist/src/index.d.ts",
   "files": [
     "dist",
     "README.md"
   ],
   "scripts": {
-    "build": "webpack --mode production",
+    "build": "rm -rf dist && webpack --mode production",
     "build:types": "tsc -p tsconfig.build.json --emitDeclarationOnly",
-    "dev": "webpack --mode development --watch",
+    "dev": "rm -rf dist && webpack --mode development --watch",
     "test": "NODE_ENV=test jest --config jest.config.ts",
     "test:watch": "NODE_ENV=test jest --config jest.config.ts --watch",
     "test:coverage": "NODE_ENV=test jest --config jest.config.ts --coverage",
     "lint": "eslint . --ext .ts",
     "lint:fix": "eslint . --ext .ts --fix",
     "prepublishOnly": "yarn build && yarn build:types",
-    "start": "node dist/api/server.js",
+    "start": "node dist/server.js",
     "clean": "rimraf dist coverage"
   },
   "keywords": [

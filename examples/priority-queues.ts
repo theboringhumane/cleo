@@ -1,5 +1,5 @@
-import { cleo, TaskState, TaskPriority } from '../src';
-import { logger } from '../src/utils/logger';
+import { cleo, TaskState, TaskPriority } from "@cleotasks/core/dist/src/index";
+import { logger } from "@cleotasks/core/dist/src/utils/logger";
 
 // Configure Cleo with Redis connection and priority queues
 cleo.configure({

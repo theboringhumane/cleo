@@ -1,25 +1,24 @@
-import { TaskOptions } from '../types/interfaces';
-import { TaskState } from '../types/enums';
-import { logger } from '../utils/logger';
-import { cleo } from '../index';
+import { TaskOptions } from "../types/interfaces";
+import { TaskState } from "../types/enums";
+import { logger } from "../utils/logger";
+import { cleo } from "../index";
 
 export interface TaskConfig extends TaskOptions {
   name?: string;
 }
 
-export function task(config: TaskConfig = {}) {
+export function task(config: TaskConfig = {}): MethodDecorator {
   return function (
     target: any,
-    propertyKey: string,
+    propertyKey: string | symbol,
     descriptor: PropertyDescriptor
-  ) {
+  ): void {
     const originalMethod = descriptor.value;
-    const taskName = config.name || propertyKey;
 
     descriptor.value = async function (...args: any[]) {
-      logger.info('File: task.ts 🎯, Line: 20, Function: task decorator;', {
-        taskName,
-        args
+      logger.info('File: task.ts 🎯, Function: task decorator;', {
+        taskName: config.name || String(propertyKey),
+        args,
       });
 
       const taskOptions: TaskOptions = {
@@ -29,30 +28,30 @@ export function task(config: TaskConfig = {}) {
         retryDelay: config.retryDelay,
         timeout: config.timeout,
         schedule: config.schedule,
-        queue: config.queue
+        queue: config.queue,
       };
 
       try {
-        // Get queue manager through the public method
         const queueManager = cleo.getQueueManager();
-        const task = await queueManager.addTask(taskName, args[0], taskOptions);
+        const task = await queueManager.addTask(config.name || String(propertyKey), args[0], taskOptions);
 
-        logger.info('File: task.ts ✅, Line: 40, Function: task decorator;', {
+        logger.info('File: task.ts ✅, Function: task decorator;', {
           taskId: task.id,
-          taskName,
-          state: TaskState.PENDING
+          taskName: config.name || String(propertyKey),
+          state: TaskState.PENDING,
         });
 
-        return task;
+        // Call the original method, passing along any arguments
+        const result = await originalMethod.apply(this, args);
+
+        return result;
       } catch (error) {
-        logger.error('File: task.ts ❌, Line: 48, Function: task decorator;', {
-          taskName,
-          error
+        logger.error('File: task.ts ❌, Function: task decorator;', {
+          taskName: config.name || String(propertyKey),
+          error,
         });
         throw error;
       }
     };
-
-    return descriptor;
   };
 }

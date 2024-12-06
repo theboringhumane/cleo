@@ -1,9 +1,9 @@
-import { task } from './decorators/task';
-import { QueueManager } from './queue/queueManager';
-import { Worker } from './workers';
-import { TaskState, TaskPriority, LogLevel } from './types/enums';
-import type { Task, TaskOptions, WorkerConfig, QueueMetrics } from './types/interfaces';
-import { redisConnection } from './config/redis';
+import { task } from "./decorators/task";
+import { QueueManager } from "./queue/queueManager";
+import { Worker } from "./workers";
+import { TaskState, TaskPriority, LogLevel } from "./types/enums";
+import type { Task, TaskOptions, WorkerConfig, QueueMetrics } from "./types/interfaces";
+import { redisConnection } from "./config/redis";
 declare class Cleo {
     private static instance;
     protected readonly queueManager: QueueManager;
@@ -26,4 +26,4 @@ declare class Cleo {
     task: typeof task;
 }
 declare const cleo: Cleo;
-export { cleo, Task, TaskOptions, WorkerConfig, QueueMetrics, TaskState, TaskPriority, LogLevel, redisConnection, Worker, };
+export { cleo, Task, TaskOptions, WorkerConfig, QueueMetrics, TaskState, TaskPriority, LogLevel, redisConnection, Worker, Cleo, };
