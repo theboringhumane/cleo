@@ -3,6 +3,8 @@ name: 🚀 Publish to NPM
 on:
   release:
     types: [created, edited]
+  push:
+    branches: [master]
 
 jobs:
   build:
@@ -28,7 +30,7 @@ jobs:
         with:
           node-version: 20
           registry-url: https://registry.npmjs.org/
-      - run: npm ci
+      - run: npm ci --ignore-scripts
       - name: Publish Core Package 🚀
         run: |
           cd packages/core
