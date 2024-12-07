@@ -1,6 +1,6 @@
-import { Job } from 'bullmq';
-import { QueueConfig, Task, TaskOptions } from '../types/interfaces';
-import { TaskState } from '../types/enums';
+import { Job } from "bullmq";
+import { QueueConfig, Task, TaskOptions } from "../types/interfaces";
+import { TaskState } from "../types/enums";
 export declare class PriorityQueueManager {
     private queues;
     private workers;
@@ -8,7 +8,6 @@ export declare class PriorityQueueManager {
     private queueConfigs;
     constructor(configs: QueueConfig[]);
     private initializeQueue;
-    processJob(job: Job): Promise<any>;
     private checkRateLimit;
     addTask(queueName: string, task: Task, options?: TaskOptions): Promise<Job | null>;
     getQueueMetrics(queueName: string): Promise<{

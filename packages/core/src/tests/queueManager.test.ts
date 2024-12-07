@@ -1,5 +1,5 @@
 import { QueueManager } from '../queue/queueManager';
-import { Task, TaskOptions } from '../types/interfaces';
+import { TaskOptions } from '../types/interfaces';
 import { TaskPriority, TaskState } from '../types/enums';
 import { jest } from '@jest/globals';
 
@@ -32,7 +32,7 @@ describe('QueueManager', () => {
       const task = await queueManager.addTask('testTask', taskData, options);
       expect(task).toBeDefined();
       expect(task.id).toContain('testTask');
-      expect(task.state).toBe(TaskState.PENDING);
+      expect(task.state).toBe(TaskState.WAITING);
       expect(task.data).toEqual(taskData);
       expect(task.options).toEqual(options);
     });

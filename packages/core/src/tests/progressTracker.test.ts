@@ -1,8 +1,6 @@
 import { ProgressTracker } from '../progress/progressTracker';
-import { TaskProgress } from '../types/interfaces';
 import WebSocket from 'ws';
 import { jest } from '@jest/globals';
-import { TaskState } from '../types/enums';
 
 // Increase timeout for WebSocket tests
 jest.setTimeout(10000);

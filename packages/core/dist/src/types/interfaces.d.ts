@@ -1,4 +1,4 @@
-import { TaskState, TaskPriority, WorkerState } from './enums';
+import { TaskState, TaskPriority, WorkerState } from "./enums";
 /**
  * Configuration options for a task
  */
@@ -12,7 +12,7 @@ export interface TaskOptions {
     /** Backoff configuration for retries */
     backoff?: {
         /** Type of backoff strategy */
-        type: 'exponential' | 'fixed';
+        type: "exponential" | "fixed";
         /** Delay in milliseconds */
         delay: number;
     };
@@ -26,6 +26,10 @@ export interface TaskOptions {
     schedule?: string;
     /** Queue name for the task */
     queue?: string;
+    /** Group name for the task */
+    group?: string;
+    /** Remove the task from the queue after completion */
+    removeOnComplete?: boolean;
 }
 /**
  * Represents a task in the queue
@@ -51,6 +55,8 @@ export interface Task<T = any> {
     error?: string;
     /** Result of the task execution */
     result?: any;
+    /** Group name for the task */
+    group?: string;
 }
 /**
  * Configuration for a worker
@@ -162,4 +168,28 @@ export interface TaskProgress {
         /** Memory usage in bytes */
         memoryUsage: number;
     };
+}
+/**
+ * Options for the @QueueClass decorator
+ */
+export interface QueueClassOptions {
+    /** Default options for all methods in the class */
+    defaultOptions?: TaskOptions;
+    /** Whether to include inherited methods */
+    includeInherited?: boolean;
+    /** Method names to exclude from queuing */
+    exclude?: string[];
+    /** Method names to include (if specified, only these methods will be queued) */
+    include?: string[];
+    /** Queue name for all methods */
+    queue?: string;
+    /** Group name for all tasks in this class. If not provided, uses the class name */
+    group?: string;
+}
+/**
+ * Worker interface
+ */
+export interface Worker {
+    registerTask(name: string, handler: Function): void;
+    getRegisteredTasks(): string[];
 }

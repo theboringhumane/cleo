@@ -1,5 +1,4 @@
 import { TaskOptions } from "../types/interfaces";
-export interface TaskConfig extends TaskOptions {
-    name?: string;
-}
-export declare function task(config?: TaskConfig): MethodDecorator;
+import { type Cleo } from "../index";
+export declare function initializeTaskDecorator(instance: Cleo): void;
+export declare function task(options?: TaskOptions): MethodDecorator;

@@ -1,106 +1,162 @@
-import { Worker as BullWorker, Job } from 'bullmq';
-import { TaskRegistry } from './taskRegistry';
-import { WorkerConfig, Task } from '../types/interfaces';
-import { TaskState, WorkerState } from '../types/enums';
-import { logger } from '../utils/logger';
-import { redisConnection } from '../config/redis';
+import { Worker as BullWorker, Job } from "bullmq";
+import { WorkerConfig } from "../types/interfaces";
+import { redisConnection } from "../config/redis";
+import { ObserverEvent, TaskStatus } from "../types/enums";
+import { TaskObserver } from "../observers/taskObserver";
+import { logger } from "../utils/logger";
+import { QueueManager } from "../queue/queueManager";
 
-export class Worker {
-  private worker: BullWorker;
-  private registry: TaskRegistry;
-  private state: WorkerState = WorkerState.IDLE;
+export class Worker extends BullWorker {
+  private registeredTasks: Map<string, Function> = new Map();
+  private observer: TaskObserver;
+  private queueManager: QueueManager | null = null;
 
-  constructor(queueName: string, config: WorkerConfig) {
-    logger.info('File: worker.ts 🚀, Line: 14, Function: constructor;', {
-      queueName,
-      config
+  constructor(
+    queueName: string,
+    config: WorkerConfig = {},
+    instanceId: string = 'default'
+  ) {
+    const redis = redisConnection.getInstance(instanceId);
+    super(queueName, async (job: Job) => {
+      // Check if task belongs to a group and if it's allowed to be processed
+      if (job.data.options?.group) {
+        const canProcess = await this.canProcessGroupedTask(job);
+        if (!canProcess) {
+          logger.debug("⏳ Worker: Task waiting in group", {
+            file: "worker/index.ts",
+            line: 25,
+            function: "processor",
+            jobId: job.id,
+            group: job.data.options.group,
+          });
+          // Delay the task and put it back in the queue
+          await job.moveToDelayed(Date.now() + 1000);
+          return null;
+        }
+      }
+
+      const handler = this.registeredTasks.get(job.name);
+      if (!handler) {
+        throw new Error(`No handler registered for task ${job.name}`);
+      }
+
+      try {
+        logger.debug("🚀 Worker: Processing task", {
+          file: "worker/index.ts",
+          line: 40,
+          function: "processor",
+          jobId: job.id,
+          name: job.name,
+          group: job.data.options?.group,
+        });
+
+        const result = await handler(...job.data.args);
+
+        // If task belongs to a group, notify completion and process next task
+        if (job.data.options?.group && this.queueManager) {
+          await this.queueManager.completeGroupTask(job.id!, job.data.options.group);
+          logger.debug("✅ Worker: Group task completed", {
+            file: "worker/index.ts",
+            line: 55,
+            function: "processor",
+            jobId: job.id,
+            group: job.data.options.group,
+          });
+        }
+
+        return result;
+      } catch (error) {
+        logger.error("❌ Worker: Task processing failed", {
+          file: "worker/index.ts",
+          line: 65,
+          function: "processor",
+          jobId: job.id,
+          error,
+        });
+        throw error;
+      }
+    }, {
+      connection: redis,
+      ...config,
     });
 
-    this.registry = new TaskRegistry();
-    this.worker = new BullWorker(queueName, this.processTask.bind(this), {
-      connection: redisConnection,
-      concurrency: config.concurrency || 1,
-    });
-
-    this.setupEventHandlers();
+    this.observer = new TaskObserver(redis);
+    this.setObservers(this.observer);
   }
 
-  private setupEventHandlers() {
-    this.worker.on('completed', (job: Job) => {
-      if (job) {
-        logger.info('File: worker.ts ✅, Line: 29, Function: setupEventHandlers;', {
+  private async canProcessGroupedTask(job: Job): Promise<boolean> {
+    if (!this.queueManager) {
+      logger.warn("⚠️ Worker: QueueManager not connected", {
+        file: "worker/index.ts",
+        line: 75,
+        function: "canProcessGroupedTask",
+      });
+      return false;
+    }
+
+    try {
+      const group = await this.queueManager.getGroup(job.data.options.group);
+      const nextTaskId = await group.getNextTask();
+      
+      // Only process if this task is next in line
+      const canProcess = nextTaskId === job.id;
+      
+      if (!canProcess) {
+        logger.debug("⏳ Worker: Task not next in group", {
+          file: "worker/index.ts",
+          line: 90,
+          function: "canProcessGroupedTask",
           jobId: job.id,
-          state: TaskState.SUCCESS
+          group: job.data.options.group,
+          nextTaskId,
         });
       }
-    });
 
-    this.worker.on('failed', (job: Job | undefined, error: Error) => {
-      logger.error('File: worker.ts ❌, Line: 36, Function: setupEventHandlers;', {
-        jobId: job?.id,
-        error,
-        state: TaskState.FAILURE
-      });
-    });
-
-    this.worker.on('error', (error: Error) => {
-      logger.error('File: worker.ts 💥, Line: 44, Function: setupEventHandlers;', {
-        error,
-        state: WorkerState.ERROR
-      });
-      this.state = WorkerState.ERROR;
-    });
-  }
-
-  private async processTask(job: Job): Promise<any> {
-    try {
-      logger.info('File: worker.ts 🔄, Line: 54, Function: processTask;', {
-        jobId: job.id,
-        state: TaskState.RUNNING
-      });
-
-      this.state = WorkerState.BUSY;
-      const task = job.data as Task;
-      const handler = this.registry.getTaskHandler(task.name);
-
-      if (!handler) {
-        throw new Error(`No handler registered for task: ${task.name}`);
-      }
-
-      const result = await handler(task.data);
-      this.state = WorkerState.IDLE;
-
-      logger.info('File: worker.ts ✅, Line: 69, Function: processTask;', {
-        jobId: job.id,
-        taskName: task.name,
-        result
-      });
-
-      return result;
+      return canProcess;
     } catch (error) {
-      this.state = WorkerState.ERROR;
-      logger.error('File: worker.ts ❌, Line: 78, Function: processTask;', {
+      logger.error("❌ Worker: Failed to check group task status", {
+        file: "worker/index.ts",
+        line: 100,
+        function: "canProcessGroupedTask",
         jobId: job.id,
-        error
+        error,
       });
-      throw error;
+      return false;
     }
   }
 
-  registerTask(name: string, handler: Function): void {
-    this.registry.registerTask(name, handler);
+  setQueueManager(queueManager: QueueManager): void {
+    this.queueManager = queueManager;
   }
 
-  getState(): WorkerState {
-    return this.state;
+  getTaskHandler(taskId: string): Function | undefined {
+    return this.registeredTasks.get(taskId);
   }
 
-  async close(): Promise<void> {
-    logger.info('File: worker.ts 🔒, Line: 90, Function: close;', {
-      state: WorkerState.STOPPED
+  setObservers(observer: TaskObserver): void {
+    this.observer = observer;
+    this.on('completed', async (job, result) => {
+      this.observer.notify(ObserverEvent.TASK_COMPLETED, job!.id as string, TaskStatus.COMPLETED, result);
     });
 
-    this.state = WorkerState.STOPPED;
-    await this.worker.close();
+    this.on('failed', (job, result) => {
+      this.observer.notify(ObserverEvent.TASK_FAILED, job!.id as string, TaskStatus.FAILED, result);
+    });
+
+    this.on('progress', (job, progress) => {
+      this.observer.notify(ObserverEvent.TASK_PROGRESS, job.id as string, TaskStatus.ACTIVE, progress);
+    });
+
+    this.on('stalled', (job, result) => {
+      this.observer.notify(ObserverEvent.TASK_STALLED, job! as string, TaskStatus.STALLED, result);
+    });
   }
-} 
+
+  registerTask(name: string, handler: Function): void {
+    this.registeredTasks.set(name, handler);
+  }
+
+  getRegisteredTasks(): string[] {
+    return Array.from(this.registeredTasks.keys());
+  }
+}

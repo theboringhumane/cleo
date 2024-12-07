@@ -1,5 +1,3 @@
-import { Queue, QueueEvents, Worker, Job } from 'bullmq';
-import IORedis from 'ioredis';
 import { TaskState } from '../types/enums';
 
 // Mock Redis client for testing
@@ -25,7 +23,7 @@ jest.mock('bullmq', () => {
     updateProgress: jest.fn().mockResolvedValue(undefined),
     moveToCompleted: jest.fn().mockResolvedValue(undefined),
     moveToFailed: jest.fn().mockResolvedValue(undefined),
-    getState: jest.fn().mockResolvedValue(TaskState.PENDING),
+    getState: jest.fn().mockResolvedValue(TaskState.WAITING),
   };
 
   return {
@@ -96,5 +94,5 @@ export const mockJob = {
   updateProgress: jest.fn().mockResolvedValue(undefined),
   moveToCompleted: jest.fn().mockResolvedValue(undefined),
   moveToFailed: jest.fn().mockResolvedValue(undefined),
-  getState: jest.fn().mockResolvedValue(TaskState.PENDING),
+  getState: jest.fn().mockResolvedValue(TaskState.WAITING),
 }; 

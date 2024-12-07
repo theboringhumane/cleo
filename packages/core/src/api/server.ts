@@ -1,7 +1,7 @@
 import fastify, { FastifyInstance } from "fastify";
 import { logger } from "../utils/logger";
 import queueRoutes from "./routes/queues";
-import { cleo, Cleo } from "../index";
+import { Cleo } from "../index";
 
 export async function createServer(cleo: Cleo): Promise<FastifyInstance> {
   const server = fastify({
@@ -55,6 +55,8 @@ export async function startServer(
     process.exit(1);
   }
 }
+
+const cleo = Cleo.getInstance();
 
 cleo.configure({
   redis: {

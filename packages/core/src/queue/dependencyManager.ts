@@ -1,14 +1,14 @@
 import { Queue, Job } from 'bullmq';
 import { Task } from '../types/interfaces';
 import { logger } from '../utils/logger';
-import { redisConnection } from '../config/redis';
+import { redisConnection, RedisInstance } from '../config/redis';
 
 export class DependencyManager {
   private dependencyQueue: Queue;
 
   constructor() {
     this.dependencyQueue = new Queue('dependency-manager', {
-      connection: redisConnection,
+      connection: redisConnection.getInstance(RedisInstance.DEFAULT),
     });
   }
 

@@ -1,13 +1,16 @@
-import { WorkerConfig } from '../types/interfaces';
-import { WorkerState } from '../types/enums';
-export declare class Worker {
-    private worker;
-    private registry;
-    private state;
-    constructor(queueName: string, config: WorkerConfig);
-    private setupEventHandlers;
-    private processTask;
+import { Worker as BullWorker } from "bullmq";
+import { WorkerConfig } from "../types/interfaces";
+import { TaskObserver } from "../observers/taskObserver";
+import { QueueManager } from "../queue/queueManager";
+export declare class Worker extends BullWorker {
+    private registeredTasks;
+    private observer;
+    private queueManager;
+    constructor(queueName: string, config?: WorkerConfig, instanceId?: string);
+    private canProcessGroupedTask;
+    setQueueManager(queueManager: QueueManager): void;
+    getTaskHandler(taskId: string): Function | undefined;
+    setObservers(observer: TaskObserver): void;
     registerTask(name: string, handler: Function): void;
-    getState(): WorkerState;
-    close(): Promise<void>;
+    getRegisteredTasks(): string[];
 }

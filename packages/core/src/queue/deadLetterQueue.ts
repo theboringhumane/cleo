@@ -1,7 +1,7 @@
 import { Queue, Job } from 'bullmq';
 import { Task } from '../types/interfaces';
 import { logger } from '../utils/logger';
-import { redisConnection } from '../config/redis';
+import { redisConnection, RedisInstance } from '../config/redis';
 import { EventEmitter } from 'events';
 
 interface DeadLetterConfig {
@@ -22,7 +22,7 @@ export class DeadLetterQueue extends EventEmitter {
     super();
     this.config = config;
     this.dlq = new Queue('dead-letter-queue', {
-      connection: redisConnection,
+      connection: redisConnection.getInstance(RedisInstance.DEFAULT),
     });
 
     logger.info('File: deadLetterQueue.ts', '💀', '22', 'constructor', 'config',
@@ -79,7 +79,7 @@ export class DeadLetterQueue extends EventEmitter {
 
       const { task, originalQueue } = job.data;
       const originalQueueInstance = new Queue(originalQueue, {
-        connection: redisConnection,
+        connection: redisConnection.getInstance(RedisInstance.DEFAULT),
       });
 
       // Add back to original queue with retry configuration

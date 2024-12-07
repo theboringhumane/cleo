@@ -1,7 +1,6 @@
 import { task } from "./decorators/task";
 import { QueueManager } from "./queue/queueManager";
 import { Worker } from "./workers";
-import { TaskState, TaskPriority, LogLevel } from "./types/enums";
 import type {
   Task,
   TaskOptions,
@@ -9,30 +8,29 @@ import type {
   QueueMetrics,
 } from "./types/interfaces";
 import { logger } from "./utils/logger";
-import { redisConnection } from "./config/redis";
+import { redisConnection, RedisInstance } from "./config/redis";
+import { initializeTaskDecorator } from "./decorators/task";
 
 // Create a Cleo class to manage configuration
 class Cleo {
-  private static instance: Cleo;
-  protected readonly queueManager: QueueManager;
-  protected worker: Worker | null = null;
+  private static instances: Map<string, Cleo> = new Map();
+  protected queueManager: QueueManager | null = null;
   private isConfigured = false;
+  private readonly instanceId: RedisInstance;
 
-  private constructor() {
-    logger.info(
-      "File: index.ts 📦, Line: 15, Function: constructor; Initializing Cleo instance"
-    );
-    this.queueManager = new QueueManager("default");
+  constructor(instanceId: RedisInstance = RedisInstance.DEFAULT) {
+    this.instanceId = instanceId;
   }
 
-  static getInstance(): Cleo {
-    if (!Cleo.instance) {
+  static getInstance(instanceId: RedisInstance = RedisInstance.DEFAULT): Cleo {
+    if (!Cleo.instances.has(instanceId)) {
       logger.info(
-        "File: index.ts 🔄, Line: 22, Function: getInstance; Creating new Cleo instance"
+        "File: index.ts 🔄, Line: 22, Function: getInstance; Creating new Cleo instance",
+        { instanceId }
       );
-      Cleo.instance = new Cleo();
+      Cleo.instances.set(instanceId, new Cleo(instanceId));
     }
-    return Cleo.instance;
+    return Cleo.instances.get(instanceId)!;
   }
 
   configure(config: {
@@ -47,10 +45,11 @@ class Cleo {
   }): void {
     try {
       logger.info(
-        "File: index.ts ⚙️, Line: 36, Function: configure; Configuring Cleo with redis settings",
+        "File: index.ts ⚙️, Line: 36, Function: configure; Configuring Cleo instance",
         {
-          host: config.redis.host,
-          port: config.redis.port,
+          instanceId: this.instanceId,
+          redisHost: config.redis.host,
+          redisPort: config.redis.port,
         }
       );
 
@@ -58,39 +57,46 @@ class Cleo {
         throw new Error("Redis host and port are required");
       }
 
-      process.env.REDIS_HOST = config.redis.host;
-      process.env.REDIS_PORT = config.redis.port.toString();
+      // Store instance-specific Redis configuration
+      const redisConfig = {
+        REDIS_HOST: config.redis.host,
+        REDIS_PORT: config.redis.port.toString(),
+        REDIS_PASSWORD: config.redis.password,
+        REDIS_TLS: config.redis.tls ? "true" : undefined,
+        REDIS_DB: config.redis.db?.toString(),
+        INSTANCE_ID: this.instanceId,
+      };
 
-      if (config.redis.password) {
-        process.env.REDIS_PASSWORD = config.redis.password;
-      }
+      logger.info(
+        "File: index.ts 🔌, Line: 43, Function: configure; Redis configuration",
+        { redisConfig }
+      );
 
-      if (config.redis.tls) {
-        process.env.REDIS_TLS = "true";
-      }
+      // Initialize Redis connection for this instance
+      redisConnection.initializeInstance(this.instanceId, redisConfig);
 
-      if (config.redis.db) {
-        process.env.REDIS_DB = config.redis.db.toString();
-      }
+      this.queueManager = new QueueManager('default', this.instanceId, {
+      }, config.worker);
 
-      if (config.worker) {
-        logger.info(
-          "File: index.ts 👷, Line: 51, Function: configure; Initializing worker"
-        );
-        this.worker = new Worker("default", config.worker);
-      }
+      // Initialize task decorator with this instance
+      initializeTaskDecorator(this);
 
       this.isConfigured = true;
       logger.info(
-        "File: index.ts ✅, Line: 56, Function: configure; Cleo configuration complete"
+        "File: index.ts ✅, Line: 56, Function: configure; Cleo configuration complete",
+        { instanceId: this.instanceId }
       );
     } catch (error) {
       logger.error(
         "File: index.ts ❌, Line: 58, Function: configure; Configuration failed",
-        { error }
+        { error, instanceId: this.instanceId }
       );
       throw error;
     }
+  }
+
+  getInstanceId(): string {
+    return this.instanceId;
   }
 
   getQueueManager(): QueueManager {
@@ -100,31 +106,71 @@ class Cleo {
       );
       throw new Error("Cleo must be configured before using");
     }
-    return this.queueManager;
+    return this.queueManager!;
   }
 
-  getWorker(): Worker | null {
-    return this.worker;
+  getWorker(queueName: string): Worker {
+    return this.queueManager!.getWorker(queueName);
   }
 
   // Method decorator
   task = task;
 }
 
-// Export a singleton instance
-const cleo = Cleo.getInstance();
-
-// Export types and enums
+// Export the core functionality
 export {
-  cleo,
+  Cleo,
   Task,
   TaskOptions,
   WorkerConfig,
   QueueMetrics,
+  redisConnection,
+};
+
+// Export the queue manager
+export { QueueManager } from './queue/queueManager';
+
+// Export the task group functionality
+export { TaskGroup } from './groups/taskGroup';
+
+// Export the observer types
+export {
+  TaskObserver,
+  type TaskObserverCallback
+} from './observers/taskObserver';
+
+// Export all enums from a single source
+export {
   TaskState,
+  TaskStatus,
   TaskPriority,
   LogLevel,
-  redisConnection,
-  Worker,
-  Cleo,
-};
+  ObserverEvent,
+  GroupOperation,
+  WorkerState,
+} from './types/enums';
+
+// Export the worker
+export { Worker } from './workers';
+
+/**
+ * Example usage:
+ * 
+ * // Create a queue manager
+ * const queueManager = new QueueManager('default');
+ * 
+ * // Subscribe to task events
+ * queueManager.onTaskEvent(ObserverEvent.STATUS_CHANGE, (taskId, status, data) => {
+ *   console.log(`Task ${taskId} status changed to ${status}`);
+ * });
+ * 
+ * // Create a task group and add tasks
+ * await queueManager.addTaskToGroup('task-1', 'important-tasks');
+ * await queueManager.addTaskToGroup('task-2', 'important-tasks');
+ * 
+ * // Get all tasks in a group
+ * const tasks = await queueManager.getGroupTasks('important-tasks');
+ * 
+ * // Remove a task from a group
+ * await queueManager.removeTaskFromGroup('task-1', 'important-tasks');
+ */

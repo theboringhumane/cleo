@@ -1,5 +1,5 @@
 import { WebSocket, WebSocketServer } from 'ws';
-import { Task, TaskProgress } from '../types/interfaces';
+import { TaskProgress } from '../types/interfaces';
 import { logger } from '../utils/logger';
 import { EventEmitter } from 'events';
 
