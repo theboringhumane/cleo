@@ -3,7 +3,7 @@ import en from '@/i18n/locales/en.json'
 import pt from '@/i18n/locales/pt.json'
 
 export const siteConfig = {
-  name: 'cleo',
+  name: 'Cleo - Task processing made elegant',
 
   description: {
     en: en.site.description,
@@ -13,11 +13,10 @@ export const siteConfig = {
   url: process.env.NEXT_PUBLIC_APP_URL,
 
   og: {
-    image: absoluteUrl('/og.jpg'),
-
+    image: 'https://opengraph.b-cdn.net/production/images/9448bba5-1ea1-455a-bb2e-792dcd81844e.jpg?token=r-XJUN3KC9RJnpltNm941PhPsJ43Lr5tllpBqLDtIwo&height=1024&width=1024&expires=33269921094',
     size: {
-      width: 1200,
-      height: 630,
+      width: 1024,
+      height: 1024,
     },
   },
 

@@ -1,13 +1,13 @@
 {
   "site": {
-    "heading": "para seus projetos com facilidade",
-    "description": "Modelo lindamente projetado e que você pode usar para seus projetos gratuitamente. Acessível. Personalizável. De código aberto.",
-    "announcement": "Apresentando Opendocs",
+    "heading": "Processamento de tarefas com elegância",
+    "description": "Cleo é um elegante framework de processamento de tarefas para Node.js que torna simples e agradável a construção de filas de tarefas distribuídas.",
+    "announcement": "Apresentando Cleo",
     "changelog": "Histórico de alterações",
 
     "buttons": {
       "get_started": "Começar",
-      "toggle_menu": "Alternar Menu",
+      "toggle_menu": "Alternar Menu", 
       "toggle_language": "Alternar Idioma"
     },
 
@@ -19,24 +19,24 @@
 
     "featured_cards": {
       "nextjs": {
-        "description": "Construído com Next.js usando a app router."
+        "description": "Construído com TypeScript e Redis para confiabilidade."
       },
 
       "shadcn": {
-        "description": "Construído em cima de Shadcn (site/components)."
+        "description": "API simples e intuitiva para processamento de tarefas."
       },
 
       "tailwind": {
-        "description": "Estilizado com Tailwind CSS."
+        "description": "Fila de tarefas distribuída com tentativas e tratamento de erros."
       },
 
       "i18n": {
-        "description": "Suporte à internacionalização com next-intl."
+        "description": "Monitoramento e observabilidade em tempo real."
       },
 
       "more": {
         "title": "e mais!",
-        "description": "Muitos mais recursos para usar como documentos e postagens de blog usando MDX, modo escuro e claro, paleta de comandos de pesquisa, sitemap internacionalizado e mais..."
+        "description": "Recursos poderosos como agendamento de tarefas, limitação de taxa, controle de concorrência, priorização de trabalhos e muito mais..."
       }
     },
 
@@ -53,7 +53,7 @@
 
     "themes": {
       "theme": "Tema",
-      "dark": "Escuro",
+      "dark": "Escuro", 
       "light": "Claro",
       "system": "Padrão do sistema"
     }
@@ -86,7 +86,7 @@
     "buttons": {
       "next": "Próximo",
       "rss_feed": "Feed RSS",
-      "previous": "Anterior",
+      "previous": "Anterior", 
       "read_more": "ler mais",
       "go_to_next_page": "Ir para a próxima página",
       "go_to_previous_page": "Ir para a página anterior"

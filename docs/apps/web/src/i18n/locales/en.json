@@ -1,12 +1,12 @@
 {
   "site": {
-    "heading": "for your projects easily",
-    "description": "Beautifully designed template that you can use for your projects for free. Accessible. Customizable. Open Source.",
-    "announcement": "Introducing Opendocs",
+    "heading": "Task processing made elegant",
+    "description": "Cleo is an elegant task processing framework for Node.js that makes building distributed task queues simple and enjoyable.",
+    "announcement": "Introducing Cleo",
     "changelog": "Changelog",
 
     "buttons": {
-      "get_started": "Get Started",
+      "get_started": "Get Started", 
       "toggle_menu": "Toggle Menu",
       "toggle_language": "Toggle Language"
     },
@@ -19,24 +19,24 @@
 
     "featured_cards": {
       "nextjs": {
-        "description": "Built with Next.js using app router."
+        "description": "Built with TypeScript and Redis for reliability."
       },
 
       "shadcn": {
-        "description": "Built on top of Shadcn (site/components)."
+        "description": "Simple and intuitive task processing API."
       },
 
       "tailwind": {
-        "description": "Styled with Tailwind CSS."
+        "description": "Distributed task queue with retries and error handling."
       },
 
       "i18n": {
-        "description": "Internationalization support with next-intl."
+        "description": "Real-time monitoring and observability."
       },
 
       "more": {
         "title": "and more!",
-        "description": "Many more features to use like documents and blog posts using MDX, dark and white mode, search command palette, internationalized sitemap and more..."
+        "description": "Powerful features like task scheduling, rate limiting, concurrency control, job prioritization, and much more..."
       }
     },
 
@@ -47,13 +47,13 @@
     "search": {
       "search": "Search",
       "no_results_found": "No results found",
-      "search_documentation": "Search documentation",
+      "search_documentation": "Search documentation", 
       "type_command_or_search": "Type a command or search"
     },
 
     "themes": {
       "theme": "Theme",
-      "dark": "Dark",
+      "dark": "Dark", 
       "light": "Light",
       "system": "System"
     }
@@ -85,7 +85,7 @@
 
     "buttons": {
       "next": "Next",
-      "previous": "Previous",
+      "previous": "Previous", 
       "rss_feed": "RSS Feed",
       "read_more": "read more",
       "go_to_next_page": "Go to next page",
