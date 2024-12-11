@@ -1,379 +1,217 @@
 ---
 title: Best Practices Guide
 description: Learn the recommended patterns and practices for building robust distributed task processing systems with Cleo.
-excerpt: "Learn battle-tested patterns and practices for building robust distributed systems with Cleo. From task design principles to performance optimization and error handling, this guide will help you build production-ready applications."
 ---
 
-# 🎯 Best Practices - The Path to Cleo Mastery
+# 🎯 Best Practices
 
-Welcome to the Cleo best practices guide! 🧙‍♂️ Let's turn you into a task-processing wizard with these battle-tested practices and patterns.
+## Task Design
 
-## 🎨 Task Design Principles
+### 1. Use Queue Classes for Organization
 
-### 1. Keep Tasks Focused and Single-Purpose
 ```typescript
-// ❌ Bad: Task doing too many things
-@cleo.task()
-async function processOrderAndSendEmailAndUpdateInventory(orderId: string) {
+@QueueClass({
+  defaultOptions: {
+    priority: TaskPriority.NORMAL,
+    maxRetries: 3,
+    retryDelay: 1000,
+    group: "notifications",
+  },
+  queue: "notifications",
+})
+class NotificationService {
+  @task({
+    id: "send-email",
+    priority: TaskPriority.HIGH,
+  })
+  async sendEmail(data: { email: string; template: string }) {
+    // Email sending logic
+  }
+
+  @task({
+    id: "send-sms",
+    priority: TaskPriority.NORMAL,
+  })
+  async sendSMS(data: { phone: string; message: string }) {
+    // SMS sending logic
+  }
+}
+```
+
+### 2. Implement Proper Error Handling
+
+```typescript
+@QueueClass({
+  defaultOptions: {
+    maxRetries: 3,
+    retryDelay: 1000,
+  }
+})
+class RobustService {
+  @task({
+    id: "process-order"
+  })
+  async processOrder(orderId: string) {
+    try {
+      // Processing logic
+    } catch (error) {
+      // Log error details
+      throw error; // Let Cleo handle retries
+    }
+  }
+}
+```
+
+### 3. Use Group Processing Strategies
+
+```typescript
+// Configure strategy based on use case
+queueManager.setGroupProcessingStrategy(GroupProcessingStrategy.ROUND_ROBIN);
+
+// For ordered processing within groups
+queueManager.setGroupProcessingStrategy(GroupProcessingStrategy.FIFO);
+
+// For priority-based processing
+queueManager.setGroupProcessingStrategy(GroupProcessingStrategy.PRIORITY);
+await queueManager.setGroupPriority("vip-users", 10);
+```
+
+## Monitoring & Observability
+
+### 1. Implement Event Listeners
+
+```typescript
+const queueManager = cleo.getQueueManager();
+
+// Monitor task lifecycle
+queueManager.onTaskEvent(ObserverEvent.STATUS_CHANGE, (taskId, status, data) => {
+  console.log(`Task ${taskId} status changed to ${status}`, data);
+});
+
+queueManager.onTaskEvent(ObserverEvent.TASK_FAILED, (taskId, status, error) => {
+  console.error(`Task ${taskId} failed:`, error);
+});
+```
+
+### 2. Track Group Statistics
+
+```typescript
+async function monitorGroupPerformance() {
+  const group = await queueManager.getGroup("user1");
+  const stats = await group.getStats();
+  
+  console.log("Group Performance:", {
+    completed: stats.completed,
+    failed: stats.failed,
+    avgProcessingTime: stats.avgProcessingTime
+  });
+}
+```
+
+## Production Deployment
+
+### 1. Configure Redis Properly
+
+```typescript
+cleo.configure({
+  redis: {
+    host: process.env.REDIS_HOST,
+    port: parseInt(process.env.REDIS_PORT || "6379"),
+    password: process.env.REDIS_PASSWORD,
+    tls: true,
+    maxRetriesPerRequest: 3,
+  },
+});
+```
+
+### 2. Implement Graceful Shutdown
+
+```typescript
+process.on('SIGTERM', async () => {
+  console.log('Shutting down gracefully...');
+  
+  // Stop accepting new tasks
+  await cleo.pause();
+  
+  // Wait for active tasks to complete
+  await cleo.waitForCompletion();
+  
+  // Clean up resources
+  await cleo.close();
+  
+  process.exit(0);
+});
+```
+
+## Common Pitfalls to Avoid
+
+### 1. ❌ Don't Mix Task Responsibilities
+
+```typescript
+// ❌ Bad: Task doing too much
+@task()
+async function processOrderAndSendEmailAndUpdateInventory() {
   // Too many responsibilities
 }
 
-// ✅ Good: Single responsibility
-@cleo.task({
-  name: 'process-order'
-})
-async function processOrder(orderId: string) {
-  logger.info('Processing order', {
-    fileName: 'tasks/orders.ts',
-    lineNo: 10,
-    functionName: 'processOrder',
-    variable: 'orderId',
-    value: orderId
-  });
-  // Only order processing logic
+// ✅ Good: Separate concerns
+@task()
+async function processOrder() {
+  // Order processing only
+}
+
+@task()
+async function sendOrderConfirmation() {
+  // Email sending only
 }
 ```
 
-### 2. Make Tasks Idempotent
+### 2. ❌ Don't Ignore Error Handling
+
 ```typescript
-// ❌ Bad: Non-idempotent task
-@cleo.task()
-async function incrementCounter() {
-  await counter.increment();
+// ❌ Bad: No error handling
+@task()
+async function riskyTask() {
+  await someRiskyOperation();
 }
 
-// ✅ Good: Idempotent task
-@cleo.task({
-  idempotencyKey: (params) => params.orderId
+// ✅ Good: Proper error handling
+@task({
+  maxRetries: 3,
+  retryDelay: 1000,
 })
-async function processPayment(params: PaymentParams) {
-  logger.info('Processing payment', {
-    fileName: 'tasks/payments.ts',
-    lineNo: 25,
-    functionName: 'processPayment',
-    variable: 'params',
-    value: params
-  });
-  
-  // Check if already processed
-  if (await isPaymentProcessed(params.orderId)) {
-    return;
-  }
-  
-  // Process payment
-  await processPaymentOnce(params);
-}
-```
-
-## 🚀 Performance Optimization
-
-### 1. Batch Processing for Better Throughput
-```typescript
-// ✅ Good: Batch processing
-@cleo.task({
-  batch: {
-    size: 100,
-    timeout: '30s'
-  }
-})
-async function processBatchOrders(orders: Order[]) {
-  logger.info('Processing order batch', {
-    fileName: 'tasks/batch.ts',
-    lineNo: 40,
-    functionName: 'processBatchOrders',
-    variable: 'batchSize',
-    value: orders.length
-  });
-  
-  // Process in chunks for memory efficiency
-  const chunks = _.chunk(orders, 10);
-  for (const chunk of chunks) {
-    await Promise.all(chunk.map(processOrderItem));
-  }
-}
-```
-
-### 2. Resource Management
-```typescript
-// ✅ Good: Proper resource cleanup
-@cleo.task({
-  name: 'process-files'
-})
-async function processFiles(fileIds: string[]) {
-  const connections: Connection[] = [];
-  
+async function robustTask() {
   try {
-    logger.info('Processing files', {
-      fileName: 'tasks/files.ts',
-      lineNo: 60,
-      functionName: 'processFiles',
-      variable: 'fileCount',
-      value: fileIds.length
-    });
-    
-    // Resource acquisition
-    for (const fileId of fileIds) {
-      connections.push(await createConnection());
-    }
-    
-    // Processing
-    await processWithConnections(connections);
-    
-  } finally {
-    // Cleanup
-    await Promise.all(connections.map(conn => conn.close()));
-  }
-}
-```
-
-## 🔄 Error Handling
-
-### 1. Proper Error Classification
-```typescript
-// ✅ Good: Classified error handling
-@cleo.task({
-  errorHandling: {
-    classifier: (error: Error) => {
-      logger.error('Task error occurred', {
-        fileName: 'tasks/error-handling.ts',
-        lineNo: 80,
-        functionName: 'errorClassifier',
-        variable: 'error',
-        value: error.message
-      });
-      
-      if (error instanceof NetworkError) {
-        return 'retry';
-      }
-      if (error instanceof ValidationError) {
-        return 'fail';
-      }
-      return 'dead-letter';
-    }
-  }
-})
-async function reliableTask() {
-  // Task implementation
-}
-```
-
-### 2. Graceful Degradation
-```typescript
-// ✅ Good: Graceful degradation
-@cleo.task({
-  fallback: async (error) => {
-    logger.warn('Using fallback', {
-      fileName: 'tasks/fallback.ts',
-      lineNo: 100,
-      functionName: 'fallback',
-      variable: 'error',
-      value: error.message
-    });
-    return await getFallbackData();
-  }
-})
-async function taskWithFallback() {
-  try {
-    return await getPrimaryData();
+    await someRiskyOperation();
   } catch (error) {
-    throw new FallbackError(error);
+    // Log error details
+    throw error; // Let Cleo handle retries
   }
 }
 ```
 
-## 📊 Monitoring & Observability
+## Best Practices Checklist
 
-### 1. Comprehensive Logging
-```typescript
-// ✅ Good: Detailed logging
-@cleo.task()
-async function auditableTask(data: any) {
-  // Entry logging
-  logger.info('Task started', {
-    fileName: 'tasks/auditable.ts',
-    lineNo: 120,
-    functionName: 'auditableTask',
-    variable: 'input',
-    value: data
-  });
-  
-  // Progress logging
-  const result = await processData(data);
-  
-  // Exit logging
-  logger.info('Task completed', {
-    fileName: 'tasks/auditable.ts',
-    lineNo: 130,
-    functionName: 'auditableTask',
-    variable: 'result',
-    value: result
-  });
-  
-  return result;
-}
-```
+1. **Task Design**
+   - [ ] Use Queue Classes for organization
+   - [ ] Implement proper error handling
+   - [ ] Configure appropriate retry strategies
+   - [ ] Use group processing when needed
 
-### 2. Metrics Collection
-```typescript
-// ✅ Good: Metrics tracking
-@cleo.task({
-  metrics: {
-    histogram: 'task_duration_seconds',
-    counter: 'task_processed_total',
-    labels: ['type', 'status']
-  }
-})
-async function measuredTask() {
-  const startTime = Date.now();
-  
-  try {
-    await processTask();
-    
-    logger.info('Task metrics', {
-      fileName: 'tasks/metrics.ts',
-      lineNo: 150,
-      functionName: 'measuredTask',
-      variable: 'duration',
-      value: Date.now() - startTime
-    });
-  } catch (error) {
-    // Metric labels will automatically capture failure
-    throw error;
-  }
-}
-```
+2. **Monitoring**
+   - [ ] Set up event listeners
+   - [ ] Track group statistics
+   - [ ] Monitor queue health
+   - [ ] Implement logging
 
-## 🔒 Security Best Practices
+3. **Production**
+   - [ ] Configure Redis properly
+   - [ ] Implement graceful shutdown
+   - [ ] Set up monitoring
+   - [ ] Plan for scaling
 
-### 1. Sensitive Data Handling
-```typescript
-// ✅ Good: Secure data handling
-@cleo.task({
-  serializer: new SecureSerializer(),
-  sanitizer: (data) => {
-    return {
-      ...data,
-      creditCard: maskCreditCard(data.creditCard)
-    };
-  }
-})
-async function processPaymentSecurely(paymentData: PaymentData) {
-  logger.info('Processing secure payment', {
-    fileName: 'tasks/secure.ts',
-    lineNo: 170,
-    functionName: 'processPaymentSecurely',
-    variable: 'paymentId',
-    value: paymentData.id // Only log non-sensitive data
-  });
-  
-  // Secure processing
-}
-```
-
-### 2. Access Control
-```typescript
-// ✅ Good: Task-level access control
-@cleo.task({
-  access: {
-    roles: ['admin', 'payment-processor'],
-    audit: true
-  }
-})
-async function restrictedTask() {
-  logger.info('Executing restricted task', {
-    fileName: 'tasks/restricted.ts',
-    lineNo: 190,
-    functionName: 'restrictedTask',
-    variable: 'user',
-    value: getCurrentUser().id
-  });
-}
-```
-
-## 🎯 Testing Strategies
-
-### 1. Comprehensive Testing
-```typescript
-// ✅ Good: Complete test coverage
-describe('Order Processing Task', () => {
-  const runner = new TestTaskRunner();
-  
-  it('should process valid orders', async () => {
-    const result = await runner.runTask(processOrder, validOrderData);
-    expect(result.status).toBe('completed');
-  });
-  
-  it('should handle invalid orders', async () => {
-    const result = await runner.runTask(processOrder, invalidOrderData);
-    expect(result.status).toBe('failed');
-    expect(result.error).toBeInstanceOf(ValidationError);
-  });
-  
-  it('should retry on network errors', async () => {
-    const result = await runner.runTask(processOrder, orderWithNetworkError);
-    expect(result.retries).toBeGreaterThan(0);
-    expect(result.status).toBe('completed');
-  });
-});
-```
-
-## 🚀 Deployment Best Practices
-
-### 1. Graceful Shutdown
-```typescript
-// ✅ Good: Graceful shutdown handling
-cleo.configure({
-  workers: {
-    gracefulShutdown: true,
-    shutdownTimeout: '30s',
-    onShutdown: async () => {
-      logger.info('Worker shutting down', {
-        fileName: 'config/workers.ts',
-        lineNo: 210,
-        functionName: 'onShutdown',
-        variable: 'activeJobs',
-        value: await getActiveJobCount()
-      });
-      await cleanup();
-    }
-  }
-});
-```
-
-### 2. Health Checks
-```typescript
-// ✅ Good: Comprehensive health checks
-async function healthCheck() {
-  const health = await cleo.getHealth();
-  
-  logger.info('Health check', {
-    fileName: 'monitoring/health.ts',
-    lineNo: 230,
-    functionName: 'healthCheck',
-    variable: 'status',
-    value: {
-      broker: health.broker ? '✅' : '❌',
-      workers: health.workers ? '✅' : '❌',
-      queues: health.queues.map(q => ({
-        name: q.name,
-        status: q.isHealthy ? '✅' : '❌'
-      }))
-    }
-  });
-  
-  return health;
-}
-```
-
-## 🎯 Remember
-
-1. **Keep It Simple**: Simple tasks are easier to maintain and debug
-2. **Be Idempotent**: Tasks should be safely retryable
-3. **Log Wisely**: Log important events but avoid noise
-4. **Monitor Everything**: You can't improve what you can't measure
-5. **Test Thoroughly**: Test happy paths, error cases, and edge cases
-6. **Handle Failures Gracefully**: Every task should have a failure strategy
-7. **Security First**: Always consider security implications
-8. **Document Well**: Future you will thank present you
-
-Need more specific examples or have questions? Join our [Discord community](https://discord.gg/cleo)! 🚀 
+4. **Error Handling**
+   - [ ] Configure retries appropriately
+   - [ ] Implement error logging
+   - [ ] Use try-catch blocks
+   - [ ] Handle edge cases

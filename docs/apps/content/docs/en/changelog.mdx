@@ -1,49 +1,72 @@
 ---
 title: Changelog
-description: Track the latest updates, improvements and changes to Cleo.
+description: Track the latest updates and changes to Cleo.
 ---
 
 # 📝 Changelog
 
-All notable changes to Cleo will be documented in this file. We follow [Semantic Versioning](https://semver.org/).
+All notable changes to Cleo will be documented in this file.
 
-## [1.0.0] - 2024-03-01 🎉
+## [1.0.0-alpha] - 2024-03-20
 
-### 🚀 Initial Release
-- Core task processing functionality with Redis integration
-- Worker management system with concurrency control
-- Task scheduling with cron syntax support
-- Priority queues with High/Medium/Low levels
-- Basic monitoring and error handling
+> **Note:** Cleo is currently in active development. Features and APIs may change.
 
-### 🎯 Core Features
+### 🎯 Core Features Added
+- Redis-based distributed task processing
+- Advanced group task management
+- Real-time task monitoring
+- Priority-based queue processing
+- Event-driven architecture using Redis pub/sub
+- Built-in error handling with configurable retries
 
-- Distributed task execution across multiple workers
-- Automatic retries with exponential backoff
-- Dead letter queues for failed tasks
-- Real-time task status tracking
-- Type-safe task definitions with TypeScript
-- Structured logging with detailed context
-- Graceful shutdown handling
-- Resource usage monitoring
+### 👥 Group Processing Features
+- Round Robin task distribution
+- FIFO (First In, First Out) processing
+- Priority-based processing with group weights
+- Dynamic group creation and management
+- Group statistics and metrics
+- Real-time group state tracking
+
+### 📊 Monitoring & Events
+- Task status change events
+- Task progress tracking
+- Group state change events
+- Performance metrics collection
+- Real-time task updates
+
+### 🏗️ Infrastructure
+- Monorepo setup with workspaces:
+  - `@cleo/core`: Core task processing engine
+  - `@cleo/dashboard`: Web dashboard for monitoring
+  - `@cleo/docs`: Documentation site
+- Example projects and implementations
+- Development tooling and scripts
 
 ### 🛠️ Developer Experience
-- Intuitive decorator-based API
-- Comprehensive TypeScript support
-- Detailed documentation and examples
-- Built-in testing utilities
-- Plugin system for extensibility
+- TypeScript-first development
+- Decorator-based task definitions
+- Clean and intuitive API
+- Comprehensive documentation
+- Example implementations
 
-### 📊 Monitoring & Debugging
-- Real-time task status dashboard
-- Prometheus metrics integration
-- Detailed execution logs
-- Error tracking and reporting
-- Health check endpoints
+### 📦 Package Structure
+- Core package for task processing
+- Dashboard for monitoring and management
+- Documentation with examples and guides
+- Basic and advanced usage examples
 
-### 🔒 Security & Reliability
-- TLS support for broker connections
-- Task persistence across restarts
-- Rate limiting capabilities
-- Memory leak protection
-- Secure task serialization
+### 🔧 Scripts & Tooling
+- Build scripts for all packages
+- Development server configurations
+- Example project runners
+- Concurrent development setup
+
+## [Upcoming]
+
+### Planned Features
+- GraphQL API for task management
+- Kubernetes integration
+- Machine learning powered scheduling
+- Enhanced dashboard features
+- Additional processing strategies
+- Extended monitoring capabilities

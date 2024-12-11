@@ -1,0 +1,217 @@
+---
+title: "Monitoring Distributed Tasks with Cleo 📊"
+date: 2024-03-23
+author_id: fofsinx
+tags: ["cleo", "task", "queue", "group", "processing", "monitoring", "orchestration"]
+excerpt: "Comprehensive guide to monitoring distributed tasks using Cleo's event system and statistics tracking capabilities."
+---
+
+# Monitoring Distributed Tasks with Cleo 📊
+
+Effective monitoring is crucial for maintaining a healthy distributed task processing system. Let's explore Cleo's comprehensive monitoring capabilities.
+
+## Event-Based Monitoring
+
+### Task Lifecycle Events
+```typescript
+const queueManager = cleo.getQueueManager();
+
+// Monitor task status changes
+queueManager.onTaskEvent(ObserverEvent.STATUS_CHANGE, (taskId, status, data) => {
+  console.log(`Task ${taskId} status changed to ${status}`, data);
+});
+
+// Track task completion
+queueManager.onTaskEvent(ObserverEvent.TASK_COMPLETED, (taskId, status, data) => {
+  console.log(`Task ${taskId} completed successfully`, data);
+});
+
+// Monitor failures
+queueManager.onTaskEvent(ObserverEvent.TASK_FAILED, (taskId, status, error) => {
+  console.error(`Task ${taskId} failed:`, error);
+});
+```
+
+### Group Events
+```typescript
+// Monitor group operations
+queueManager.onTaskEvent(ObserverEvent.GROUP_CHANGE, (taskId, status, data) => {
+  console.log(`Group operation: ${data.operation}`, {
+    group: data.group,
+    taskId,
+    status,
+  });
+});
+```
+
+## Statistics and Metrics
+
+### Queue Statistics
+```typescript
+async function monitorQueueHealth() {
+  const queueManager = cleo.getQueueManager();
+  const queues = await queueManager.getQueues();
+  
+  for (const queue of queues) {
+    const stats = await queue.getStats();
+    console.log(`Queue ${queue.name}:`, {
+      waiting: stats.waiting,
+      active: stats.active,
+      completed: stats.completed,
+      failed: stats.failed,
+    });
+  }
+}
+```
+
+### Group Performance
+```typescript
+async function trackGroupPerformance() {
+  const group = await queueManager.getGroup("critical-tasks");
+  const stats = await group.getStats();
+  
+  console.log("Group Performance:", {
+    completed: stats.completed,
+    failed: stats.failed,
+    avgProcessingTime: stats.avgProcessingTime,
+    activeWorkers: stats.activeWorkers,
+  });
+}
+```
+
+## Real-time Task Tracking
+
+### Task Progress
+```typescript
+@QueueClass({
+  defaultOptions: {
+    group: "long-running",
+  },
+})
+class ProcessingService {
+  @task({
+    id: "process-large-dataset",
+  })
+  async processDataset(data: any[]) {
+    const total = data.length;
+    
+    for (let i = 0; i < total; i++) {
+      await processItem(data[i]);
+      
+      // Update progress
+      const progress = ((i + 1) / total) * 100;
+      this.updateProgress(progress);
+    }
+  }
+}
+
+// Monitor progress events
+queueManager.onTaskEvent(ObserverEvent.PROGRESS_UPDATE, (taskId, progress) => {
+  console.log(`Task ${taskId} progress: ${progress}%`);
+});
+```
+
+## Error Monitoring
+
+### Error Tracking
+```typescript
+@QueueClass({
+  defaultOptions: {
+    maxRetries: 3,
+    retryDelay: 1000,
+  },
+})
+class MonitoredService {
+  @task({
+    id: "critical-operation",
+  })
+  async performOperation(data: any) {
+    try {
+      // Operation logic
+    } catch (error) {
+      // Log detailed error information
+      console.error("Operation failed:", {
+        taskId: this.taskId,
+        error: error.message,
+        stack: error.stack,
+        data,
+      });
+      throw error;
+    }
+  }
+}
+```
+
+### Retry Monitoring
+```typescript
+// Track retry attempts
+queueManager.onTaskEvent(ObserverEvent.RETRY_ATTEMPT, (taskId, attempt) => {
+  console.log(`Task ${taskId} retry attempt ${attempt}`);
+});
+```
+
+## Best Practices
+
+### 1. Structured Logging
+```typescript
+function logTaskEvent(event: string, data: any) {
+  console.log({
+    timestamp: new Date().toISOString(),
+    event,
+    ...data,
+  });
+}
+
+queueManager.onTaskEvent(ObserverEvent.STATUS_CHANGE, (taskId, status, data) => {
+  logTaskEvent("task_status_change", {
+    taskId,
+    status,
+    data,
+  });
+});
+```
+
+### 2. Performance Monitoring
+- Track processing times
+- Monitor queue sizes
+- Watch resource usage
+- Set up alerts for anomalies
+
+### 3. Error Handling
+- Log detailed error contexts
+- Track retry patterns
+- Monitor failure rates
+- Set up error notifications
+
+## Setting Up Alerts
+
+### Critical Conditions
+```typescript
+function setupAlerts() {
+  // Queue size alerts
+  queueManager.onQueueSizeExceeded("critical-queue", 1000, () => {
+    notifyTeam("Queue size exceeded threshold");
+  });
+
+  // Error rate alerts
+  queueManager.onErrorRateExceeded(0.1, () => {
+    notifyTeam("High error rate detected");
+  });
+}
+```
+
+## Conclusion
+
+Effective monitoring is essential for:
+- Ensuring system health
+- Detecting issues early
+- Optimizing performance
+- Maintaining reliability
+
+Remember to:
+- Monitor key metrics
+- Set up proper logging
+- Configure alerts
+- Track performance trends
+
+Keep your task processing system healthy and efficient with Cleo's monitoring capabilities! 🚀

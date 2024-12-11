@@ -1,124 +1,83 @@
 ---
 title: Introduction to Cleo 🚀
-description: A powerful distributed task queue system for Node.js that makes background job processing a breeze. Built with scalability, reliability and developer experience in mind.
+description: A powerful distributed task queue system for Node.js that makes background job processing a breeze.
 ---
 
 # Welcome to Cleo! 🎯
 
-**Cleo** is a robust distributed task queue system for Node.js, engineered to handle background job processing with enterprise-grade reliability and performance. Inspired by Python's Celery but built from the ground up for Node.js, Cleo provides a developer-friendly solution for handling millions of asynchronous tasks at scale.
+**Cleo** is a modern distributed task queue system for Node.js, designed for reliability and ease of use. It provides a clean decorator-based API for handling background jobs with powerful group processing capabilities.
 
-## 🌟 Why Choose Cleo?
+## 🌟 Quick Example
 
 ```typescript
-// Simple, type-safe task definitions
-@cleo.task({
-  queue: 'notifications',
-  priority: 'high',
-  retries: 3
-})
-async function sendPriorityEmail(user: User, template: EmailTemplate) {
-  logger.info('Sending priority email', {
-    fileName: 'tasks/notifications.ts',
-    lineNo: 25,
-    functionName: 'sendPriorityEmail',
-    variable: 'user',
-    value: user.id
-  });
-  // Email sending logic
-}
+import { Cleo } from "@cleotasks/core";
+import { task } from "@cleotasks/core/decorators/task";
+import { TaskPriority } from "@cleotasks/core/types/enums";
 
-// Easy task scheduling
-@cleo.schedule('*/15 * * * *')  // Every 15 minutes
-async function generateReports() {
-  logger.info('Generating reports', {
-    fileName: 'tasks/reports.ts',
-    lineNo: 42,
-    functionName: 'generateReports',
-    variable: 'timestamp',
-    value: new Date().toISOString()
-  });
-  // Report generation logic
+// Configure Cleo
+const cleo = Cleo.getInstance();
+cleo.configure({
+  redis: {
+    host: "localhost",
+    port: 6379,
+    password: "cleosecret",
+  },
+  worker: {
+    concurrency: 4,
+    queues: [
+      {
+        name: "send-email",
+        priority: TaskPriority.HIGH,
+      },
+    ],
+  },
+});
+
+// Define a task service
+class EmailService {
+  @task({
+    id: "send-email",
+    priority: TaskPriority.HIGH,
+    queue: 'send-email',
+  })
+  sendEmail(input: { email: string }): Promise<string> {
+    return Promise.resolve(`Sent to ${input.email}`);
+  }
 }
 ```
 
 ## ✨ Key Features
 
 ### 🔄 Task Processing
-- **Distributed Execution**: Scale across multiple workers and machines with zero configuration
-- **Priority Queues**: Multi-level priority system for critical task handling
-- **Batch Processing**: Efficient handling of task groups with shared context
-- **Concurrency Control**: Fine-grained control over worker concurrency and resource usage
+- Decorator-based task definitions
+- Priority queues with multiple levels
+- Group-based task processing
+- Automatic retries and error handling
 
-### 📬 Message Handling
-- **Redis Integration**: Rock-solid message broker with guaranteed delivery
-- **Dead Letter Queues**: Automatic handling of failed tasks
-- **Message Persistence**: Never lose a task, even during system failures
-- **Real-time Updates**: Live task status and progress tracking
+### 📊 Monitoring
+- Real-time task status tracking
+- Event-based monitoring system
+- Group statistics and metrics
+- Comprehensive error tracking
 
-### ⚡ Performance & Scaling
-- **Horizontal Scaling**: Add workers dynamically across your infrastructure
-- **Load Balancing**: Automatic work distribution among available workers
-- **Resource Management**: Smart CPU and memory utilization
-- **Connection Pooling**: Efficient database and external service connections
+### 🎛️ Processing Strategies
+- Round Robin distribution
+- FIFO (First In, First Out)
+- Priority-based processing
+- Group-based scheduling
 
 ### 🛠️ Developer Experience
-- **TypeScript First**: Full type safety and excellent IDE support
-- **Decorators API**: Clean, intuitive task definitions
-- **Middleware System**: Easily extend and customize behavior
-- **Plugin Architecture**: Rich ecosystem of community plugins
+- TypeScript-first design
+- Clean decorator syntax
+- Intuitive configuration
+- Extensive documentation
 
-### 📊 Monitoring & Debugging
-- **Real-time Dashboard**: Beautiful visualization of your task ecosystem
-- **Prometheus Metrics**: Built-in support for metric collection
-- **Structured Logging**: Detailed task execution logs
-- **Error Tracking**: Comprehensive error handling and reporting
+## 🚀 Next Steps
 
-## 🚀 Quick Start
-
-```typescript
-import { cleo } from '@cleotasks/core';
-
-// Define a task
-@cleo.task()
-async function processOrder(orderId: string) {
-  logger.info('Processing order', {
-    fileName: 'examples/quick-start.ts',
-    lineNo: 15,
-    functionName: 'processOrder',
-    variable: 'orderId',
-    value: orderId
-  });
-  
-  // Your task logic here
-  const order = await OrderService.get(orderId);
-  await PaymentService.process(order);
-  await NotificationService.notify(order.userId);
-}
-
-// Enqueue a task
-await cleo.enqueue('processOrder', '12345', {
-  priority: 'high',
-  delay: '5m',
-  retries: 3
-});
-```
-
-## 📚 Next Steps
-
-- [Installation Guide](/docs/installation) - Get Cleo up and running
-- [Core Concepts](/docs/core-concepts) - Learn the fundamentals
-- [API Reference](/docs/api-reference) - Explore the complete API
-- [Best Practices](/docs/best-practices) - Build production-ready systems
-- [Examples](/docs/examples) - See real-world usage patterns
-
-## 🤝 Community & Support
-
-- [GitHub Discussions](https://github.com/cleotasks/cleo/discussions) - Join the conversation
-- [Discord Community](https://discord.gg/cleotasks) - Get real-time help
-- [Stack Overflow](https://stackoverflow.com/questions/tagged/cleotasks) - Find solutions
-- [Contributing Guide](/docs/contributing) - Help make Cleo better
-
-Ready to supercharge your background processing? Let's get started! 🚀
+- [Quick Start Guide](./quick-start)
+- [Core Concepts](./core-concepts)
+- [API Reference](./api-reference)
+- [Best Practices](./best-practices)
 
 
 

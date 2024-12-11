@@ -1,217 +1,58 @@
 ---
 title: Installation Guide
-description: Get started with Cleo by installing the required packages and setting up your environment.
-excerpt: "Learn how to install and run Cleo using Docker Compose or as a standalone package. This guide covers all the necessary steps to get your distributed task queue system up and running in minutes."
+description: Get started with Cleo by installing and configuring your environment.
 ---
 
-# 🚀 Installation
+# Installation Guide
 
 ## Prerequisites
 
-Before installing Cleo, ensure you have:
+- Node.js 14 or later
+- Redis server
+- TypeScript (for TypeScript projects)
 
-1. [Docker](https://docs.docker.com/get-docker/) (version 20.10.0 or later) - Required for Docker setup
-2. [Docker Compose](https://docs.docker.com/compose/install/) (version 2.0.0 or later) - Required for Docker setup
-3. [Node.js](https://nodejs.org/) (version 16 or later) - Required for @cleocore package
-4. Git (for cloning the repository)
+## Basic Installation
 
-## Installation Methods
-
-### Method 1: Using @cleocore Package
-
-If you only need the core functionality in your Node.js application:
-
-1. Install the package:
 ```bash
-npm install @cleocore bullmq ioredis
+# Install Cleo
+npm install @cleotasks/core
 ```
 
-2. Basic setup:
+## Basic Configuration
+
 ```typescript
-import { cleo } from '@cleocore';
-import IORedis from 'ioredis';
+import { Cleo } from "@cleotasks/core";
+import { TaskPriority } from "@cleotasks/core/types/enums";
 
-// Configure Redis connection
-const redis = new IORedis({
-  host: process.env.REDIS_HOST || 'localhost',
-  port: parseInt(process.env.REDIS_PORT || '6379'),
-  password: process.env.REDIS_PASSWORD
-});
+const cleo = Cleo.getInstance();
 
-// Configure Cleo
-cleo.configure({
-  redis,
-  worker: {
-    concurrency: 5,
-    prefix: 'my-app'
-  }
-});
-
-// Define a task
-@cleo.task()
-async function processOrder(orderId: string) {
-  logger.info('Processing order', {
-    fileName: 'tasks/orders.ts',
-    lineNo: 25,
-    functionName: 'processOrder',
-    variable: 'orderId',
-    value: orderId
-  });
-  // Task implementation
-}
-
-// Enqueue a task
-await cleo.enqueue('processOrder', 'order123');
-```
-
-### Method 2: Full Suite with Docker Compose
-
-If you need the complete Cleo ecosystem including:
-- Core API server
-- Web Dashboard for monitoring and management
-- Documentation site
-- Redis instance
-- Built-in monitoring and logging
-
-1. Clone the repository:
-```bash
-git clone https://github.com/cleotasks/cleo.git
-cd cleo
-```
-
-2. Create an environment file:
-```bash
-# .env
-REDIS_PASSWORD=your_secure_password_here  # Default: cleosecret
-NODE_ENV=production
-LOG_LEVEL=info
-```
-
-3. Start all services:
-```bash
-docker compose up -d
-```
-
-This will start:
-- Core API server on port 3001
-- Dashboard UI on port 3000 (with task monitoring, queue management, and metrics)
-- Documentation site on port 3002
-- Redis instance on port 6379
-
-4. Verify the installation:
-```bash
-docker compose ps
-```
-
-You should see all services running:
-```
-NAME                COMMAND                  SERVICE             STATUS              PORTS
-cleo-core           "bun run start:core"    core                running (healthy)   0.0.0.0:3001->3001/tcp
-cleo-dashboard      "bun run start:dash…"   dashboard          running (healthy)   0.0.0.0:3000->3000/tcp
-cleo-docs           "bun run start:docs"    docs               running (healthy)   0.0.0.0:3002->3002/tcp
-cleo-redis          "redis-server --app…"   redis              running (healthy)   0.0.0.0:6379->6379/tcp
-```
-
-5. Access the services:
-- Dashboard: [http://localhost:3000](http://localhost:3000)
-- API Documentation: [http://localhost:3001/docs](http://localhost:3001/docs)
-- User Documentation: [http://localhost:3002](http://localhost:3002)
-
-## Development Setup
-
-### For @cleocore Package Development:
-```bash
-# Install dependencies
-npm install
-
-# Run tests
-npm test
-
-# Build the package
-npm run build
-```
-
-### For Full Suite Development:
-```bash
-# Start services in development mode
-docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
-
-# View logs
-docker compose logs -f
-
-# Restart a specific service
-docker compose restart core
-```
-
-## Configuration
-
-### @cleocore Package Configuration:
-```typescript
 cleo.configure({
   redis: {
-    host: process.env.REDIS_HOST,
-    port: parseInt(process.env.REDIS_PORT || '6379'),
-    password: process.env.REDIS_PASSWORD
+    host: "localhost",
+    port: 6379,
+    password: "cleosecret",
   },
   worker: {
-    concurrency: 5,
-    maxMemoryUsage: '1GB',
-    prefix: 'my-app'
+    concurrency: 4,
+    queues: [
+      {
+        name: "default",
+        priority: TaskPriority.NORMAL,
+      },
+    ],
   },
-  logging: {
-    level: 'info',
-    format: 'json'
-  }
 });
 ```
 
-### Docker Compose Environment Variables:
+## Environment Variables
+
 ```env
-# Redis Configuration
-REDIS_PASSWORD=your_secure_password_here
-REDIS_HOST=redis
+REDIS_HOST=localhost
 REDIS_PORT=6379
-
-# Application Settings
-NODE_ENV=production  # or development
-LOG_LEVEL=info      # debug, info, warn, error
-
-# API Configuration
-CORE_API_URL=http://core:3001  # Internal URL for services
-```
-
-## Troubleshooting
-
-### @cleocore Package Issues:
-```typescript
-// Enable debug logging
-cleo.configure({
-  logging: {
-    level: 'debug'
-  }
-});
-
-// Check Redis connection
-const status = await cleo.checkHealth();
-console.log(status);
-```
-
-### Docker Compose Issues:
-```bash
-# Check service logs
-docker compose logs core
-
-# Check Redis connection
-docker compose exec redis redis-cli -a ${REDIS_PASSWORD} ping
-
-# Restart services
-docker compose restart
+REDIS_PASSWORD=cleosecret
 ```
 
 ## Next Steps
 
-- [Quick Start Guide](/docs/quick-start) - Learn how to create and process tasks
-- [Core Concepts](/docs/core-concepts) - Understand Cleo's architecture
-- [API Reference](/docs/api-reference) - Explore the complete API
-
-Need help? Check our [troubleshooting guide](/docs/troubleshooting) or join our [community](/community).
+- [Quick Start Guide](./quick-start)
+- [Core Concepts](./core-concepts)

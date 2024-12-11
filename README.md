@@ -1,6 +1,11 @@
 # Cleo - Advanced Task Queue Management System 🚀
 
+![Cleo Logo](docs/apps/web/public/logo.svg)
+
 Cleo is a powerful, Redis-based distributed task queue management system with advanced group processing capabilities, real-time monitoring, and sophisticated task orchestration.
+
+
+![Cleo Logo](docs/apps/web/public/og.jpg)
 
 > **🚧 Under Development:** Cleo is currently in active development. Features and APIs may change. Stay tuned for updates!
 

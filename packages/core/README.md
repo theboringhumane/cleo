@@ -1,229 +1,285 @@
-# 🚀 Cleo - Modern Distributed Task Queue System
+# Cleo - Advanced Task Queue Management System 🚀
 
-[![npm version](https://badge.fury.io/js/%40cleotasks%2Fcore.svg)](https://www.npmjs.com/package/@cleotasks/core)
-[![TypeScript](https://badges.frapsoft.com/typescript/code/typescript.svg?v=101)](https://github.com/ellerbrock/typescript-badges/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+![Cleo Logo](../../docs/apps/web/public/logo.svg)
 
-Cleo is a powerful, TypeScript-first distributed task queue system for Node.js that makes background job processing simple, reliable, and scalable. Inspired by Celery, but built from the ground up for the Node.js ecosystem.
+Cleo is a powerful, Redis-based distributed task queue management system with advanced group processing capabilities, real-time monitoring, and sophisticated task orchestration.
 
-## ✨ Key Features
+![Cleo Logo](../../docs/apps/web/public/og.jpg)
 
-- **🎯 Distributed Task Processing**
-  - Scale across multiple nodes
-  - Automatic load balancing
-  - Fault tolerance and high availability
+> **🚧 Under Development:** Cleo is currently in active development. Features and APIs may change. Stay tuned for updates!
 
-- **⚡ High Performance**
-  - Concurrent task execution
-  - Optimized worker pools
-  - Efficient message broker integration
 
-- **🔄 Reliability**
-  - Automatic retries with backoff
-  - Dead letter queues
-  - Transaction support
-  - Task persistence
+> **Note:** We're based on BullMQ, but with some added features and improvements. See the [BullMQ docs](https://docs.bullmq.io/) for more information but we'll cover the main differences here.
 
-- **📊 Advanced Features**
-  - Priority queues
-  - Task dependencies
-  - Rate limiting
-  - Task scheduling (cron)
-  - Progress tracking
-  - Real-time monitoring
+## Features 🌟
 
-## 🚀 Quick Start
+### Core Features
+- 🔄 Distributed task processing with automatic load balancing
+- 👥 Advanced group task management with multiple processing strategies
+- 📊 Real-time task monitoring and event-driven updates
+- 🎯 Priority-based processing with dynamic adjustments
+- ⚡ Event-driven architecture using Redis pub/sub
+- 🛡️ Built-in error handling with configurable retries
+- 📈 Comprehensive task statistics and metrics
 
-### Installation
+### Group Processing Strategies
+- 🔄 Round Robin: Fair task distribution across groups for balanced processing
+- 📝 FIFO: Sequential processing within groups for ordered execution
+- ⭐ Priority: Dynamic priority-based processing with group weights
 
-```bash
-# Install core package
-npm install @cleotasks/core
+## System Architecture 🏗️
+
+```mermaid
+graph TB
+    Client[Client Application] --> Decorator[Task Decorator]
+    Decorator --> QM[Queue Manager]
+    QM --> Redis[(Redis)]
+    QM --> Worker[Worker Pool]
+    QM --> Observer[Task Observer]
+    QM --> Groups[Task Groups]
+    Worker --> Redis
+    Observer --> Redis
+    Groups --> Redis
+    
+    subgraph "Event System"
+        Observer --> Events((Event Bus))
+        Events --> Monitoring[Monitoring System]
+        Events --> Logging[Logging System]
+        Events --> Metrics[Metrics Collection]
+    end
+
+    subgraph "Group Processing"
+        Groups --> Strategy{Strategy Manager}
+        Strategy --> RR[Round Robin]
+        Strategy --> FIFO[FIFO]
+        Strategy --> Priority[Priority]
+    end
+
+    subgraph "Worker Pool"
+        Worker --> W1[Worker 1]
+        Worker --> W2[Worker 2]
+        Worker --> W3[Worker 3]
+    end
 ```
 
-### Basic Usage
+## Task Processing Flow 🔄
 
-```typescript
-import { cleo } from '@cleotasks/core';
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant D as Decorator
+    participant QM as Queue Manager
+    participant G as Task Group
+    participant W as Worker
+    participant R as Redis
+    participant O as Observer
 
-// 1. Configure Cleo
-cleo.configure({
-  broker: {
-    type: 'redis',
-    url: process.env.REDIS_URL
-  },
-  workers: {
-    concurrency: 5,
-    autoStart: true
-  }
-});
-
-// 2. Define a Task
-@cleo.task({
-  name: 'process-order',
-  queue: 'orders',
-  retries: 3
-})
-async function processOrder(orderId: string) {
-  logger.info('Processing order', {
-    fileName: 'tasks/orders.ts',
-    lineNo: 25,
-    functionName: 'processOrder',
-    variable: 'orderId',
-    value: orderId
-  });
-  // Order processing logic
-}
-
-// 3. Enqueue Tasks
-await cleo.enqueue('process-order', '12345', {
-  priority: 'high',
-  delay: '5m'
-});
-
-// 4. Start Processing
-cleo.start();
+    C->>D: Call Method
+    D->>QM: Decorate & Submit
+    QM->>G: Check Group
+    G->>R: Store Group State
+    QM->>R: Queue Task
+    
+    Note over W,R: Continuous Processing
+    W->>R: Poll for Tasks
+    W->>G: Check Group Order
+    G->>R: Verify Next Task
+    W->>QM: Process Task
+    QM->>O: Emit Events
+    O->>R: Update Status
+    O->>C: Notify Completion
 ```
 
-## 📚 Documentation
+## Real-World Use Cases 🌍
 
-Visit our [comprehensive documentation](https://cleo-docs.vercel.app) for:
-- Detailed guides and tutorials
-- API reference
-- Best practices
-- Advanced configuration
-- Deployment strategies
-
-## 🎯 Core Features in Detail
-
-### Priority Queues
-```typescript
-@cleo.task({
-  priority: TaskPriority.HIGH,
-  queue: 'critical-tasks'
-})
-async function urgentTask() {
-  // High-priority task logic
-}
+### Video Processing Pipeline 🎥
+```mermaid
+graph TB
+    Upload[Upload Video] --> Validate[Validate Format]
+    Validate --> Split[Split Segments]
+    Split --> Parallel
+    
+    subgraph Parallel[Parallel Processing]
+        Transcode[Transcode Video]
+        Audio[Process Audio]
+        Thumbnail[Generate Thumbnails]
+    end
+    
+    Parallel --> Merge[Merge Streams]
+    Merge --> Optimize[Optimize Output]
+    Optimize --> CDN[Push to CDN]
+    
+    subgraph "Group: Video Pipeline"
+        direction TB
+        Validate
+        Split
+        Parallel
+        Merge
+        Optimize
+        CDN
+    end
 ```
 
-### Task Dependencies
-```typescript
-@cleo.task({
-  dependencies: ['validate-payment', 'check-inventory']
-})
-async function fulfillOrder(orderId: string) {
-  // Execute after dependencies complete
-}
+### E-commerce Order Processing 🛍️
+```mermaid
+graph TB
+    Order[New Order] --> Validate[Validate Order]
+    Validate --> Stock[Check Stock]
+    Stock --> Payment[Process Payment]
+    
+    Payment --> Parallel
+    
+    subgraph Parallel[Parallel Processing]
+        Invoice[Generate Invoice]
+        Label[Create Shipping Label]
+        Email[Send Email]
+        SMS[Send SMS]
+    end
+    
+    Parallel --> Warehouse[Warehouse Notification]
+    Warehouse --> Track[Initialize Tracking]
+    
+    subgraph "Group: Order Processing"
+        direction TB
+        Validate
+        Stock
+        Payment
+        Parallel
+        Warehouse
+        Track
+    end
 ```
 
-### Scheduling
-```typescript
-@cleo.task({
-  schedule: {
-    cron: '0 0 * * *', // Daily at midnight
-    timezone: 'UTC'
-  }
-})
-async function dailyCleanup() {
-  // Scheduled task logic
-}
+### AI Training Pipeline 🤖
+```mermaid
+graph TB
+    Data[Data Collection] --> Clean[Data Cleaning]
+    Clean --> Feature[Feature Engineering]
+    Feature --> Split[Train/Test Split]
+    
+    Split --> Training
+    
+    subgraph Training[Training Pipeline]
+        Model[Train Model]
+        Validate[Cross Validation]
+        Tune[Hyperparameter Tuning]
+    end
+    
+    Training --> Evaluate[Model Evaluation]
+    Evaluate --> Deploy[Model Deployment]
+    
+    subgraph "Group: ML Pipeline"
+        direction TB
+        Clean
+        Feature
+        Split
+        Training
+        Evaluate
+        Deploy
+    end
 ```
 
-### Progress Tracking
-```typescript
-@cleo.task({
-  enableProgress: true
-})
-async function processLargeDataset(data: any[]) {
-  const total = data.length;
-  for (let i = 0; i < total; i++) {
-    await processItem(data[i]);
-    this.updateProgress((i + 1) / total * 100);
-  }
-}
+## Advanced Features 🔧
+
+### Task Grouping Capabilities
+- 🔄 **Dynamic Group Creation**
+  - Auto-scaling groups
+  - Group merging and splitting
+  - Dynamic priority adjustment
+
+- 📊 **Group Statistics**
+  - Real-time metrics
+  - Performance analytics
+  - Resource utilization
+
+- 🎯 **Processing Strategies**
+  - Adaptive batch processing
+  - Smart task routing
+  - Load-based scaling
+
+### Event System Architecture 🎯
+
+```mermaid
+graph TB
+    Task[Task Execution] --> Events{Event Bus}
+    
+    Events --> Status[Status Updates]
+    Events --> Progress[Progress Events]
+    Events --> System[System Events]
+    
+    subgraph "Status Events"
+        Status --> Created[Task Created]
+        Status --> Started[Task Started]
+        Status --> Completed[Task Completed]
+        Status --> Failed[Task Failed]
+    end
+    
+    subgraph "Progress Events"
+        Progress --> Percent[Percentage Update]
+        Progress --> Stage[Stage Complete]
+        Progress --> Milestone[Milestone Reached]
+    end
+    
+    subgraph "System Events"
+        System --> Worker[Worker Status]
+        System --> Queue[Queue Metrics]
+        System --> Resource[Resource Usage]
+    end
 ```
 
-## 🔧 Configuration
+## Performance Optimizations ⚡
 
-Cleo is highly configurable to meet your specific needs:
+### Redis Integration
+- 📊 Efficient data structures for task storage
+- 🔄 Pub/Sub for real-time event propagation
+- 💾 Atomic operations for data consistency
+- 🔍 Smart caching strategies
 
-```typescript
-cleo.configure({
-  broker: {
-    type: 'redis',
-    url: process.env.REDIS_URL,
-    prefix: 'cleo:',
-    tls: true
-  },
-  workers: {
-    concurrency: 5,
-    maxMemory: '1GB',
-    gracefulShutdown: true
-  },
-  monitoring: {
-    metrics: true,
-    dashboard: {
-      port: 3000,
-      auth: true
-    }
-  },
-  logging: {
-    level: 'info',
-    format: 'json',
-    destination: 'console'
-  }
-});
+### Worker Management
+- 🔄 Dynamic worker scaling
+- 📈 Intelligent load balancing
+- 🚦 Adaptive rate limiting
+- 🎯 Resource-aware task distribution
+
+### Group Processing
+- 🎯 Predictive task batching
+- 📊 Dynamic priority adjustment
+- 🔄 Efficient task ordering
+- ⚡ Pipeline optimization
+
+## Security Features 🔒
+
+### Authentication & Authorization
+- 🔐 Redis ACL support
+- 🛡️ Task-level permissions
+- 📝 Audit logging
+- 🔑 Role-based access control
+
+### Data Protection
+- 🔒 Encryption at rest
+- 🔐 Secure task data handling
+- 🛡️ Input validation
+- 📝 Data sanitization
+
+## Monitoring & Debugging 🔍
+
+### Real-time Metrics
+- 📊 Task success/failure rates
+- ⏱️ Processing time analytics
+- 🎯 Group performance metrics
+- 📈 Resource utilization stats
+
+### Logging System
+- 📝 Structured logging
+- 🚨 Error tracking
+- 📊 Performance profiling
+- 🔍 Debug information
+
+## Installation & Setup 🛠️
+
+Docs web app: https://cleo.theboring.name/docs
+
+## License 📄
+
+MIT License - see LICENSE file for details
 ```
-
-## 🧪 Testing
-
-Cleo includes comprehensive testing utilities:
-
-```typescript
-import { TestTaskRunner } from '@cleotasks/testing';
-
-describe('Order Processing', () => {
-  it('should process orders correctly', async () => {
-    const runner = new TestTaskRunner();
-    const result = await runner.runTask(processOrder, '12345');
-    expect(result.status).toBe('completed');
-  });
-});
-```
-
-## 📊 Monitoring
-
-Built-in monitoring and metrics:
-
-```typescript
-// Get queue metrics
-const metrics = await cleo.getMetrics();
-console.log('Queue Health:', {
-  activeJobs: metrics.active,
-  waitingJobs: metrics.waiting,
-  completedJobs: metrics.completed,
-  failedJobs: metrics.failed
-});
-```
-
-## 🤝 Contributing
-
-We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md) for details.
-
-1. Fork the repository
-2. Create your feature branch
-3. Commit your changes
-4. Push to the branch
-5. Create a Pull Request
-
-## 📄 License
-
-Cleo is [MIT licensed](LICENSE).
-
-## 🌟 Support
-
-- 📚 [Documentation](https://cleo-docs.vercel.app)
-- 💬 [Discord Community](https://discord.gg/cleo)
-- 🐛 [Issue Tracker](https://github.com/yourusername/cleo/issues)
-- 📧 [Email Support](mailto:support@cleo.dev)

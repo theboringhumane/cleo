@@ -1,0 +1,300 @@
+---
+title: "Scaling Task Processing: From Startup to Enterprise 📈"
+date: 2024-03-22
+author_id: fofsinx
+tags: ["cleo", "task", "queue", "scaling", "performance", "redis", "bullmq"]
+excerpt: "Learn how to scale your task processing system from handling thousands to millions of tasks using Cleo. Best practices for horizontal and vertical scaling with Redis and BullMQ."
+---
+
+# Scaling Task Processing: From Startup to Enterprise 📈
+
+Scaling a distributed task processing system requires careful consideration of various factors. Let's explore how to scale Cleo effectively using Redis and BullMQ's powerful features.
+
+## Understanding the Architecture
+
+Cleo is built on top of BullMQ and Redis, providing a robust foundation for scaling:
+
+```typescript
+import { Cleo } from "@cleotasks/core";
+import { TaskPriority } from "@cleotasks/core/types/enums";
+
+// Basic configuration
+const cleo = Cleo.getInstance();
+cleo.configure({
+  redis: {
+    host: "localhost",
+    port: 6379,
+    password: "cleosecret",
+  },
+  worker: {
+    concurrency: 4,
+    queues: [
+      {
+        name: "high-priority",
+        priority: TaskPriority.HIGH,
+      },
+    ],
+  },
+});
+```
+
+## Vertical Scaling Strategies
+
+### 1. Increasing Concurrency
+
+```typescript
+// Scale up worker concurrency
+cleo.configure({
+  worker: {
+    concurrency: 50, // Increase based on CPU cores
+    queues: [
+      {
+        name: "intensive-jobs",
+        concurrency: 25, // Queue-specific concurrency
+      },
+    ],
+  },
+});
+```
+
+### 2. Memory Management
+
+```typescript
+// Configure memory limits
+cleo.configure({
+  worker: {
+    maxMemoryPercent: 80, // Stop accepting jobs at 80% memory usage
+    memoryCheckInterval: 1000, // Check every second
+  },
+});
+```
+
+## Horizontal Scaling
+
+### 1. Redis Cluster Setup
+
+```typescript
+// Configure Redis Cluster
+cleo.configure({
+  redis: {
+    cluster: [
+      { host: "redis-1", port: 6379 },
+      { host: "redis-2", port: 6379 },
+      { host: "redis-3", port: 6379 },
+    ],
+    maxRetriesPerRequest: 3,
+    retryStrategy: (times: number) => Math.min(times * 50, 2000),
+  },
+});
+```
+
+### 2. Multiple Workers
+
+```typescript
+// Distribute workers across instances
+const workerConfig = {
+  name: "worker-1",
+  queues: [
+    { name: "emails", priority: TaskPriority.HIGH },
+    { name: "notifications", priority: TaskPriority.NORMAL },
+  ],
+  concurrency: 10,
+};
+
+// Start multiple workers
+startWorker(workerConfig);
+```
+
+## Queue Optimization
+
+### 1. Rate Limiting
+
+```typescript
+@QueueClass({
+  defaultOptions: {
+    rateLimiter: {
+      max: 1000, // Maximum jobs per time window
+      duration: 1000, // Time window in milliseconds
+    },
+  },
+})
+class RateLimitedService {
+  @task({
+    id: "rate-limited-task",
+  })
+  async process() {
+    // Rate-limited processing
+  }
+}
+```
+
+### 2. Job Prioritization
+
+```typescript
+@QueueClass({
+  defaultOptions: {
+    priority: 1, // Lower number = higher priority
+  },
+})
+class PriorityService {
+  @task({
+    id: "high-priority-task",
+    priority: TaskPriority.HIGH,
+  })
+  async processUrgent() {
+    // Urgent task processing
+  }
+}
+```
+
+## Performance Optimization
+
+### 1. Batch Processing
+
+```typescript
+@QueueClass({
+  defaultOptions: {
+    group: "batch-jobs",
+  },
+})
+class BatchProcessor {
+  @task({
+    id: "process-batch",
+  })
+  async processBatch(items: any[]) {
+    // Process items in chunks
+    const chunks = this.chunkArray(items, 100);
+    for (const chunk of chunks) {
+      await Promise.all(chunk.map(item => this.processItem(item)));
+    }
+  }
+}
+```
+
+### 2. Connection Pool Management
+
+```typescript
+// Configure connection pool
+cleo.configure({
+  redis: {
+    enableReadyCheck: true,
+    maxRetriesPerRequest: 3,
+    connectionNamespace: "cleo",
+    connectTimeout: 5000,
+    disconnectTimeout: 5000,
+  },
+});
+```
+
+## Monitoring at Scale
+
+### 1. Metrics Collection
+
+```typescript
+const queueManager = cleo.getQueueManager();
+
+// Monitor queue metrics
+async function collectMetrics() {
+  const queues = await queueManager.getQueues();
+  for (const queue of queues) {
+    const metrics = await queue.getMetrics();
+    console.log(`Queue ${queue.name} metrics:`, {
+      processed: metrics.processed,
+      failed: metrics.failed,
+      delayed: metrics.delayed,
+      active: metrics.active,
+    });
+  }
+}
+```
+
+### 2. Health Checks
+
+```typescript
+async function checkSystemHealth() {
+  const health = await cleo.getHealth();
+  const redisInfo = await health.getRedisInfo();
+  
+  console.log("System Health:", {
+    redis: {
+      connectedClients: redisInfo.connected_clients,
+      usedMemory: redisInfo.used_memory_human,
+      commandsProcessed: redisInfo.total_commands_processed,
+    },
+    queues: health.queues,
+    workers: health.workers,
+  });
+}
+```
+
+## Best Practices for Scaling
+
+1. **Redis Configuration**
+   - Enable persistence
+   - Configure proper maxmemory policy
+   - Use Redis Cluster for high availability
+
+2. **Worker Management**
+   - Scale workers based on CPU cores
+   - Monitor worker health
+   - Implement graceful shutdown
+
+3. **Queue Design**
+   - Use appropriate priorities
+   - Implement rate limiting
+   - Design efficient batch processing
+
+4. **Monitoring**
+   - Track key metrics
+   - Set up alerts
+   - Monitor Redis health
+
+## Common Pitfalls to Avoid
+
+1. **Memory Management**
+```typescript
+// ❌ Bad: No memory limits
+cleo.configure({
+  worker: {
+    concurrency: 100,
+  },
+});
+
+// ✅ Good: Proper memory management
+cleo.configure({
+  worker: {
+    concurrency: 100,
+    maxMemoryPercent: 80,
+    memoryCheckInterval: 1000,
+  },
+});
+```
+
+2. **Connection Handling**
+```typescript
+// ❌ Bad: No connection management
+const redis = new Redis();
+
+// ✅ Good: Proper connection handling
+const redis = new Redis({
+  maxRetriesPerRequest: 3,
+  enableReadyCheck: true,
+  retryStrategy: (times) => Math.min(times * 50, 2000),
+});
+```
+
+## Conclusion
+
+Scaling Cleo effectively requires:
+- Understanding Redis and BullMQ capabilities
+- Proper configuration of workers and queues
+- Efficient resource management
+- Comprehensive monitoring
+
+Remember to:
+- Scale gradually
+- Monitor performance
+- Optimize resource usage
+- Plan for failures
+
+Happy scaling! 🚀
