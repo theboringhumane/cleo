@@ -21,7 +21,7 @@ export async function CodeBlock({
   return (
     <div
       className={cn(
-        'mb-4 mt-6 max-h-[650px] overflow-x-auto p-4 overflow-auto rounded-lg border py-4',
+        'mb-4 mt-6 max-h-[650px] overflow-x-auto overflow-auto rounded-lg border',
         'bg-primary dark:bg-zinc-900 text-white',
         className
       )}

@@ -86,3 +86,8 @@
     @apply px-4;
   }
 }
+
+
+.shiki {
+  @apply !p-4;
+}

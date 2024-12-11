@@ -22,7 +22,7 @@ export const siteConfig = {
   },
 
   app: {
-    latestVersion: '1.0.0',
+    latestVersion: '1.0.0-beta.5',
   },
 
   author: {
@@ -31,6 +31,11 @@ export const siteConfig = {
   },
 
   links: {
+    discord: {
+      label: 'Discord',
+      url: 'https://discord.gg/MXQgb9s5bA',
+    },
+
     twitter: {
       label: 'Twitter',
       username: '@0xalioth',

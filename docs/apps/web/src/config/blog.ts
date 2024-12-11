@@ -19,7 +19,7 @@ export const blogConfig: BlogConfig = {
       */
       id: 'fofsinx',
       name: 'Fofsinx',
-      image: '/authors/fofsinx.jpg',
+      image: 'https://avatars.githubusercontent.com/u/46974223?v=4',
       site: 'https://blog.theboring.name',
       email: 'thehuman@theboring.name',
 

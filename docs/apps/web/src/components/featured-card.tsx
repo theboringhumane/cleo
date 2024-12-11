@@ -1,50 +1,62 @@
-import React, { type PropsWithChildren } from 'react'
-
-import {
-  Card,
-  CardTitle,
-  CardHeader,
-  CardContent,
-  CardDescription,
-} from '@/components/ui/card'
+import { Card } from '@/components/ui/card'
+import { CodeBlock } from './code-block'
 import { cn } from '@/lib/utils'
+import type { ReactNode } from 'react'
 
-type FeaturedCardProps = PropsWithChildren<{
-  icon?: React.ReactNode
-  title?: React.ReactNode
-  description?: React.ReactNode
+interface FeaturedCardProps {
+  icon?: ReactNode
+  title?: ReactNode
+  description?: ReactNode
+  code?: string
   orientation?: 'horizontal' | 'vertical'
-}>
+}
 
 export function FeaturedCard({
   icon,
   title,
-  children,
   description,
+  code,
   orientation = 'vertical',
 }: FeaturedCardProps) {
   return (
-    <Card className="backdrop-blur-lg dark:bg-card-primary">
-      <CardHeader
-        className={cn(
-          'flex gap-4 pb-2',
-          orientation === 'horizontal' ? 'flex-row items-center' : 'flex-col'
+    <Card
+      className={cn(
+        'flex backdrop-blur-lg dark:bg-card-primary p-4 md:p-6',
+        {
+          'flex-col': orientation === 'vertical',
+          'flex-row items-center gap-4': orientation === 'horizontal',
+        }
+      )}
+    >
+      {icon && (
+        <div
+          className={cn('flex items-center justify-center text-2xl', {
+            'mb-2': orientation === 'vertical',
+          })}
+        >
+          {icon}
+        </div>
+      )}
+
+      <div className="space-y-2">
+        {title && (
+          <h3 className="font-bold">{title}</h3>
         )}
-      >
-        {icon && (
-          <div className="bg-muted/45 flex w-11 items-center justify-center rounded-md px-3 py-2 text-center text-lg">
-            {icon}
+
+        {description && (
+          <p className="text-muted-foreground text-sm">{description}</p>
+        )}
+
+        {code && (
+          <div className="mt-4">
+            <CodeBlock
+              language="ts"
+              code={code}
+              className="text-sm"
+            />
           </div>
         )}
-
-        {title && <CardTitle>{title}</CardTitle>}
-      </CardHeader>
-
-      <CardContent className="flex flex-col gap-2">
-        {description && <CardDescription>{description}</CardDescription>}
-
-        {children}
-      </CardContent>
+      </div>
     </Card>
   )
 }

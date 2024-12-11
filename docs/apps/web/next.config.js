@@ -6,12 +6,19 @@ const nextConfig = {
   swcMinify: true,
   async redirects() {
     return [
-      {
-        source: '/',
-        destination: '/docs',
-        permanent: true,
-      },
+      // {
+      //   source: '/',
+      //   destination: '/docs',
+      //   permanent: true,
+      // },
     ]
+  },
+  images: {
+    remotePatterns: [
+      {
+        hostname: 'avatars.githubusercontent.com',
+      },
+    ],
   },
 }
 

@@ -65,7 +65,7 @@ export async function highlightServerCode(
   const html = highlighter.codeToHtml(code, {
     lang: language,
     theme,
-    structure: 'inline',
+    structure: 'classic',
   })
 
   return html

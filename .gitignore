@@ -49,3 +49,4 @@ yarn-error.log*
 .DS_Store
 *.pem
 *.tsbuildinfo
+packages/core/dist*
