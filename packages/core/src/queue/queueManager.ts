@@ -123,7 +123,7 @@ export class QueueManager {
         delay: options.retryDelay || 3000,
       },
       removeOnComplete: options.removeOnComplete || false,
-      repeat: options.schedule ? { pattern: options.schedule } : undefined,
+      repeat: options.schedule ? { pattern: options.schedule.pattern, startDate: options.schedule.startDate, endDate: options.schedule.endDate } : undefined,
     };
 
     const job = await queue!.add(name, data, jobOptions);
@@ -230,7 +230,7 @@ export class QueueManager {
               delay: task.options.retryDelay || 3000,
             },
             removeOnComplete: task.options.removeOnComplete || false,
-            repeat: task.options.schedule ? { pattern: task.options.schedule } : undefined,
+            repeat: task.options.schedule ? { pattern: task.options.schedule.pattern, startDate: task.options.schedule.startDate, endDate: task.options.schedule.endDate } : undefined,
           };
 
           await queue.add(task.name, task.data, {
@@ -553,7 +553,7 @@ export class QueueManager {
               delay: task.options.retryDelay || 3000,
             },
             removeOnComplete: task.options.removeOnComplete || false,
-            repeat: task.options.schedule ? { pattern: task.options.schedule } : undefined,
+            repeat: task.options.schedule ? { pattern: task.options.schedule.pattern, startDate: task.options.schedule.startDate, endDate: task.options.schedule.endDate } : undefined,
           };
 
           await queue.add(task.name, task.data, {

@@ -1,4 +1,5 @@
 import { TaskState, TaskPriority, WorkerState } from "./enums";
+import { RepeatOptions } from "bullmq";
 /**
  * Configuration options for a task
  */
@@ -23,7 +24,7 @@ export interface TaskOptions {
     /** Timeout for task execution in milliseconds */
     timeout?: number;
     /** Cron expression for scheduled tasks */
-    schedule?: string;
+    schedule?: RepeatOptions;
     /** Queue name for the task */
     queue?: string;
     /** Group name for the task */
