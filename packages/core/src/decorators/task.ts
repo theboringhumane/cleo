@@ -1,7 +1,8 @@
 import { TaskOptions } from "../types/interfaces";
 import { logger } from "../utils/logger";
-import { TaskState } from "../types/enums";
+import { ObserverEvent, TaskState } from "../types/enums";
 import { redisConnection, type Cleo } from "../index";
+import { generateUUID } from "../utils";
 
 let cleoInstance: Cleo | null = null;
 
@@ -19,10 +20,10 @@ export function task(options: TaskOptions = {}): MethodDecorator {
     const methodName = String(propertyKey);
 
     if (!cleoInstance) {
-      throw new Error('Task decorator used before Cleo initialization');
+      throw new Error("Task decorator used before Cleo initialization");
     }
-    
-    const queueName = options.queue || 'default';
+
+    const queueName = options.queue || "default";
     const queueManager = cleoInstance.getQueueManager();
 
     let queue = queueManager.getQueue(queueName);
@@ -36,7 +37,7 @@ export function task(options: TaskOptions = {}): MethodDecorator {
       });
 
       queueManager.initializeQueue(queueName, {
-        connection: redisConnection.getInstance('default'),
+        connection: redisConnection.getInstance("default"),
       });
     }
 
@@ -47,15 +48,18 @@ export function task(options: TaskOptions = {}): MethodDecorator {
     }
 
     // Ensure the method is bound to its instance with proper typing
-    worker.registerTask(methodName, function(this: typeof target, ...args: any[]) {
-      logger.debug("🎯 Task Decorator: Executing task", {
-        file: "task.ts",
-        line: 75,
-        function: methodName,
-        args,
-      });
-      return originalMethod.apply(this, args);
-    });
+    worker.registerTask(
+      methodName,
+      function (this: typeof target, ...args: any[]) {
+        logger.debug("🎯 Task Decorator: Executing task", {
+          file: "task.ts",
+          line: 75,
+          function: methodName,
+          args,
+        });
+        return originalMethod.apply(this, args);
+      }
+    );
 
     logger.info("🎯 Task Decorator: Task registered", {
       file: "task.ts",
@@ -66,134 +70,75 @@ export function task(options: TaskOptions = {}): MethodDecorator {
     });
 
     // Replace the original method with proper typing
-    descriptor.value = async function(this: typeof target, ...args: any[]): Promise<any> {
+    descriptor.value = async function (
+      this: typeof target,
+      ...args: any[]
+    ): Promise<any> {
       const startTime = Date.now();
       let taskId: string | undefined;
 
       try {
         const taskOptions = {
           ...options,
-          id: `${methodName}-${Date.now()}`,
-          timeout: options.timeout || 30000, // Default 30s timeout
-          maxRetries: options.maxRetries || 3, // Default 3 retries
+          id: `${methodName}-${generateUUID()}`,
+          timeout: options.timeout || 30000,
+          maxRetries: options.maxRetries || 3,
         };
 
         taskId = taskOptions.id;
 
-        logger.debug("🚀 Task Decorator: Creating task", {
-          file: "task.ts",
-          line: 100,
-          function: methodName,
-          taskId,
-          options: taskOptions,
-        });
+        const task = await queueManager.addTask(
+          methodName,
+          {
+            args,
+            context: this,
+          },
+          taskOptions
+        );
 
-        // Create task and add to queue
-        const task = await queueManager.addTask(methodName, {
-          args,
-          context: this,
-        }, taskOptions);
-
-        // If task belongs to a group, add it to the group
         if (taskOptions.group) {
-          await queueManager.addTaskToGroup(task.id, taskOptions.group);
-          
-          logger.debug("👥 Task Decorator: Task added to group", {
-            file: "task.ts",
-            line: 85,
-            function: methodName,
-            taskId: task.id,
-            group: taskOptions.group,
-          });
+          await queueManager.addTaskToGroup(methodName, taskOptions, args);
 
-          // Wait for task to be processed with proper error handling
+          // Use event-based approach instead of polling
           return new Promise((resolve, reject) => {
-            let timeoutId: NodeJS.Timeout;
-            let intervalId: NodeJS.Timeout;
-            let retryCount = 0;
+            const timeoutId = setTimeout(() => {
+              queueManager.offTaskEvent(ObserverEvent.TASK_COMPLETED);
+              queueManager.offTaskEvent(ObserverEvent.TASK_FAILED);
+              reject(new Error("Task processing timeout"));
+            }, taskOptions.timeout);
 
-            const cleanup = () => {
-              clearInterval(intervalId);
-              clearTimeout(timeoutId);
-            };
-
-            const handleError = async (error: Error) => {
-              cleanup();
-              if (retryCount < taskOptions.maxRetries!) {
-                retryCount++;
-                logger.warn("⚠️ Task Decorator: Retrying task", {
-                  file: "task.ts",
-                  line: 150,
-                  function: methodName,
-                  taskId,
-                  error,
-                  retry: retryCount,
-                });
-                // Wait before retrying
-                await new Promise(resolve => setTimeout(resolve, 1000 * retryCount));
-                startPolling();
-              } else {
-                reject(error);
-              }
-            };
-
-            const startPolling = () => {
-              intervalId = setInterval(async () => {
-                try {
-                  const updatedTask = await queueManager.getTask(task.id);
-                  if (!updatedTask) {
-                    await handleError(new Error('Task not found'));
-                    return;
-                  }
-
-                  if (updatedTask.state === TaskState.FAILED) {
-                    await handleError(new Error(updatedTask.error || 'Task failed'));
-                    return;
-                  }
-
-                  if (updatedTask.state !== TaskState.WAITING) {
-                    cleanup();
-                    const executionTime = Date.now() - startTime;
-                    logger.info("✅ Task Decorator: Task completed", {
-                      file: "task.ts",
-                      line: 180,
-                      function: methodName,
-                      taskId,
-                      executionTime,
-                      result: updatedTask.result,
-                    });
-                    resolve(updatedTask.result);
-                  }
-                } catch (error) {
-                  await handleError(error instanceof Error ? error : new Error(String(error)));
+            queueManager.onTaskEvent(
+              ObserverEvent.TASK_COMPLETED,
+              (completedTaskId, status, result) => {
+                if (completedTaskId === taskId) {
+                  clearTimeout(timeoutId);
+                  queueManager.offTaskEvent(ObserverEvent.TASK_COMPLETED);
+                  queueManager.offTaskEvent(ObserverEvent.TASK_FAILED);
+                  resolve(result);
                 }
-              }, 1000); // Check every second
+              }
+            );
 
-              // Set a timeout to prevent infinite waiting
-              timeoutId = setTimeout(async () => {
-                await handleError(new Error('Task processing timeout'));
-              }, taskOptions.timeout);
-            };
-
-            startPolling();
+            queueManager.onTaskEvent(
+              ObserverEvent.TASK_FAILED,
+              (failedTaskId, status, error) => {
+                if (failedTaskId === taskId) {
+                  clearTimeout(timeoutId);
+                  queueManager.offTaskEvent(ObserverEvent.TASK_COMPLETED);
+                  queueManager.offTaskEvent(ObserverEvent.TASK_FAILED);
+                  reject(error);
+                }
+              }
+            );
           });
         }
 
         // For non-grouped tasks
-        logger.info("✅ Task Decorator: Non-grouped task completed", {
-          file: "task.ts",
-          line: 210,
-          function: methodName,
-          taskId,
-          executionTime: Date.now() - startTime,
-          result: task.result,
-        });
         return task.result;
       } catch (error) {
         const executionTime = Date.now() - startTime;
         logger.error("❌ Task Decorator: Task execution failed", {
           file: "task.ts",
-          line: 220,
           function: methodName,
           taskId,
           error,
@@ -208,7 +153,7 @@ export function task(options: TaskOptions = {}): MethodDecorator {
     return Object.assign(descriptor, {
       configurable: true,
       enumerable: true,
-      writable: true
+      writable: true,
     });
   };
 }

@@ -28,6 +28,12 @@ class EmailService {
     queue: 'send-email',
   })
   sendEmail(input: { email: string }): Promise<string> {
+    console.log("🚀 ~ EmailService ~ sendEmail ~ input", {
+      file: "basic.ts",
+      line: 31,
+      function: "sendEmail",
+      input,
+    });
     return Promise.resolve(`Sent to ${input.email}`);
   }
 }
@@ -48,8 +54,7 @@ queueManager.onTaskEvent(ObserverEvent.TASK_ADDED, (taskId, status, data) => {
 
 queueManager.onTaskEvent(ObserverEvent.TASK_COMPLETED, (taskId, status, data) => {
   console.log(`Task ${taskId} completed`, status, data);
+  process.exit(0);
 });
 
 emailService.sendEmail({ email: "test@test.com" });
-
-queueManager.offTaskEvent(ObserverEvent.TASK_COMPLETED);

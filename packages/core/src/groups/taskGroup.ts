@@ -1,7 +1,7 @@
 import { Redis } from "ioredis";
 import { TaskStatus, TaskState } from "../types/enums";
 import { logger } from "../utils/logger";
-import type { Task } from "../types/interfaces";
+import type { Task, TaskOptions } from "../types/interfaces";
 import type { Worker } from "../workers";
 import { QueueManager } from "../queue/queueManager";
 
@@ -49,16 +49,43 @@ export class TaskGroup {
     });
   }
 
-  async addTask(taskId: string): Promise<void> {
+  async addTask(
+    methodName: string,
+    taskOptions: TaskOptions,
+    taskData: any
+  ): Promise<void> {
     try {
+      const { id: taskId, queue: queueName } = taskOptions;
+
+      if (!taskId || !queueName) {
+        throw new Error("Task ID and queue name are required");
+      }
+
       await this.redis.sadd(this.groupKey, taskId);
       const orderScore = Date.now();
-      await this.redis.zadd(this.processingOrderKey, orderScore.toString(), taskId);
+      await this.redis.zadd(
+        this.processingOrderKey,
+        orderScore.toString(),
+        taskId
+      );
       await this.redis.hset(this.stateKey, taskId, TaskStatus.WAITING);
+
+      // Store the full task options
+      await this.redis.hset(
+        `${this.groupKey}:options`,
+        taskId,
+        JSON.stringify(taskOptions)
+      );
+      await this.redis.hset(
+        `${this.groupKey}:data`,
+        taskId,
+        JSON.stringify(taskData)
+      );
+      await this.redis.hset(`${this.groupKey}:method`, taskId, methodName);
 
       // If connected to QueueManager, update task state
       if (this.queueManager) {
-        const task = await this.queueManager.getTask(taskId);
+        const task = await this.queueManager.getTask(taskId, queueName);
         if (task) {
           task.state = TaskState.WAITING;
           await this.queueManager.updateTask(task);
@@ -80,11 +107,31 @@ export class TaskGroup {
         file: "taskGroup.ts",
         line: 39,
         function: "addTask",
-        taskId,
+        taskId: taskOptions.id,
         error,
       });
       throw error;
     }
+  }
+
+  async getAllTasks(): Promise<[taskId: string, queue: string][]> {
+    // get all tasks from redis
+    const tasks = await this.redis.hgetall(this.stateKey);
+    const taskIds = Object.keys(tasks);
+
+    const result: [taskId: string, queue: string][] = [];
+
+    for (const taskId of taskIds) {
+      const options = await this.redis.hget(`${this.groupKey}:options`, taskId);
+      const taskData = await this.redis.hget(`${this.groupKey}:data`, taskId);
+      const taskMethod = await this.redis.hget(
+        `${this.groupKey}:method`,
+        taskId
+      );
+      result.push([taskId, JSON.parse(options!)["queue"]]);
+    }
+
+    return result;
   }
 
   private async updateStats(): Promise<void> {
@@ -175,6 +222,19 @@ export class TaskGroup {
     }
   }
 
+  async getTaskOptionsAndData(taskId: string): Promise<{
+    options: TaskOptions;
+    data: any;
+    method: string | null;
+  } | null> {
+    const options = await this.redis.hget(`${this.groupKey}:options`, taskId);
+    const data = await this.redis.hget(`${this.groupKey}:data`, taskId);
+    const method = await this.redis.hget(`${this.groupKey}:method`, taskId);
+    return options && data
+      ? { options: JSON.parse(options), data: JSON.parse(data), method }
+      : null;
+  }
+
   async getTasksWithDetails(): Promise<Task[]> {
     try {
       if (!this.queueManager) {
@@ -183,7 +243,7 @@ export class TaskGroup {
 
       const taskIds = await this.getTasks();
       const tasks = await Promise.all(
-        taskIds.map(id => this.queueManager!.getTask(id))
+        taskIds.map((id) => this.queueManager!.getTask(id))
       );
 
       return tasks.filter((task): task is Task => task !== null);
@@ -303,12 +363,12 @@ export class TaskGroup {
     if (!this.queueManager || !this.worker) {
       throw new Error("TaskGroup not connected to QueueManager and Worker");
     }
-
     try {
-      const nextTaskId = await this.getNextTask();
-      if (!nextTaskId) return;
+      const nextTask = await this.getNextTask();
+      if (!nextTask) return;
 
-      const task = await this.queueManager.getTask(nextTaskId);
+      const [nextTaskId, queueName] = nextTask;
+      const task = await this.queueManager.getTask(nextTaskId, queueName);
       if (!task) {
         logger.warn("⚠️ TaskGroup: task not found", {
           file: "taskGroup.ts",
@@ -331,7 +391,7 @@ export class TaskGroup {
       }
 
       try {
-        const result = await handler(task.data.args);
+        const result = await handler(...(task.data.args ?? task.data));
         task.result = result;
         task.state = TaskState.COMPLETED;
         await this.completeTask(nextTaskId);
@@ -383,7 +443,9 @@ export class TaskGroup {
     try {
       const taskIds = await this.getTasks();
       await Promise.all(
-        taskIds.map((taskId) => this.updateTaskStatus(taskId, TaskStatus.PAUSED))
+        taskIds.map((taskId) =>
+          this.updateTaskStatus(taskId, TaskStatus.PAUSED)
+        )
       );
       logger.info("⏸️ TaskGroup: all tasks paused", {
         file: "taskGroup.ts",
@@ -406,7 +468,9 @@ export class TaskGroup {
     try {
       const taskIds = await this.getTasks();
       await Promise.all(
-        taskIds.map((taskId) => this.updateTaskStatus(taskId, TaskStatus.ACTIVE))
+        taskIds.map((taskId) =>
+          this.updateTaskStatus(taskId, TaskStatus.ACTIVE)
+        )
       );
       logger.info("▶️ TaskGroup: all tasks resumed", {
         file: "taskGroup.ts",
@@ -425,28 +489,34 @@ export class TaskGroup {
     }
   }
 
-  async getNextTask(): Promise<string | null> {
+  async getNextTask(): Promise<[string, string] | null> {
     try {
       const tasks = await this.redis.zrange(this.processingOrderKey, 0, 0);
       if (tasks.length === 0) return null;
       const nextTask = tasks[0];
       await this.redis.zrem(this.processingOrderKey, nextTask);
       await this.redis.sadd(this.processingKey, nextTask);
-      
-      logger.debug("⏭️ TaskGroup: next task selected", {
+
+      // get task options and get queue name
+      const taskOptions = await this.getTaskOptionsAndData(nextTask);
+      if (!taskOptions) return null;
+      const { options } = taskOptions;
+      const queueName = options.queue;
+
+      logger.info("⏭️ TaskGroup: next task selected", {
         file: "taskGroup.ts",
         line: 220,
         function: "getNextTask",
-        taskId: nextTask
+        taskId: nextTask,
       });
 
-      return nextTask;
+      return [nextTask, queueName!];
     } catch (error) {
       logger.error("❌ TaskGroup: failed to get next task", {
         file: "taskGroup.ts",
         line: 230,
         function: "getNextTask",
-        error
+        error,
       });
       throw error;
     }
@@ -456,14 +526,14 @@ export class TaskGroup {
     try {
       await Promise.all([
         this.redis.srem(this.processingKey, taskId),
-        this.updateTaskStatus(taskId, TaskStatus.COMPLETED)
+        this.updateTaskStatus(taskId, TaskStatus.COMPLETED),
       ]);
 
       logger.debug("✅ TaskGroup: task completed", {
         file: "taskGroup.ts",
         line: 248,
         function: "completeTask",
-        taskId
+        taskId,
       });
     } catch (error) {
       logger.error("❌ TaskGroup: failed to complete task", {
@@ -471,7 +541,7 @@ export class TaskGroup {
         line: 255,
         function: "completeTask",
         taskId,
-        error
+        error,
       });
       throw error;
     }

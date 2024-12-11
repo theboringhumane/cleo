@@ -43,10 +43,14 @@ queueManager.onTaskEvent(ObserverEvent.GROUP_CHANGE, (taskId, status, data) => {
 // Example service using class decorator with group
 @QueueClass({
   defaultOptions: {
-    priority: TaskPriority.NORMAL,
     maxRetries: 3,
     retryDelay: 1000,
+    backoff: {
+      type: "fixed",
+      delay: 2000,
+    },
     group: "user1",
+    timeout: 300000,
   },
   queue: "notifications",
 })
@@ -77,10 +81,14 @@ class User1NotificationService {
 
 @QueueClass({
   defaultOptions: {
-    priority: TaskPriority.HIGH,
     maxRetries: 3,
+    backoff: {
+      type: "fixed",
+      delay: 2000,
+    },
     retryDelay: 1000,
     group: "user2",
+    timeout: 300000,
   },
   queue: "notifications",
 })
@@ -189,6 +197,8 @@ async function demonstrateGroupProcessing() {
 
   queueManager.onTaskEvent(ObserverEvent.TASK_FAILED, (taskId, status, error) => {
     console.log(`❌ Task ${taskId} failed:`, error);
+    queueManager.offTaskEvent(ObserverEvent.TASK_COMPLETED);
+    queueManager.offTaskEvent(ObserverEvent.TASK_FAILED);
   });
 
   try {

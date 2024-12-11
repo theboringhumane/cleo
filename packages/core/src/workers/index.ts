@@ -14,71 +14,91 @@ export class Worker extends BullWorker {
   constructor(
     queueName: string,
     config: WorkerConfig = {},
-    instanceId: string = 'default'
+    instanceId: string = "default"
   ) {
     const redis = redisConnection.getInstance(instanceId);
-    super(queueName, async (job: Job) => {
-      // Check if task belongs to a group and if it's allowed to be processed
-      if (job.data.options?.group) {
-        const canProcess = await this.canProcessGroupedTask(job);
-        if (!canProcess) {
-          logger.debug("⏳ Worker: Task waiting in group", {
-            file: "worker/index.ts",
-            line: 25,
-            function: "processor",
-            jobId: job.id,
-            group: job.data.options.group,
-          });
-          // Delay the task and put it back in the queue
-          await job.moveToDelayed(Date.now() + 1000);
-          return null;
-        }
-      }
-
-      const handler = this.registeredTasks.get(job.name);
-      if (!handler) {
-        throw new Error(`No handler registered for task ${job.name}`);
-      }
-
-      try {
-        logger.debug("🚀 Worker: Processing task", {
-          file: "worker/index.ts",
-          line: 40,
-          function: "processor",
-          jobId: job.id,
-          name: job.name,
-          group: job.data.options?.group,
-        });
-
-        const result = await handler(...job.data.args);
-
-        // If task belongs to a group, notify completion and process next task
-        if (job.data.options?.group && this.queueManager) {
-          await this.queueManager.completeGroupTask(job.id!, job.data.options.group);
-          logger.debug("✅ Worker: Group task completed", {
-            file: "worker/index.ts",
-            line: 55,
-            function: "processor",
-            jobId: job.id,
-            group: job.data.options.group,
-          });
+    super(
+      queueName,
+      async (job: Job) => {
+        // Check if task belongs to a group and if it's allowed to be processed
+        if (job.data.options?.group) {
+          const canProcess = await this.canProcessGroupedTask(job);
+          if (!canProcess) {
+            logger.debug("⏳ Worker: Task waiting in group", {
+              file: "worker/index.ts",
+              line: 25,
+              function: "processor",
+              jobId: job.id,
+              group: job.data.options.group,
+            });
+            // Delay the task and put it back in the queue
+            await job.moveToDelayed(Date.now() + 1000);
+            return null;
+          }
         }
 
-        return result;
-      } catch (error) {
-        logger.error("❌ Worker: Task processing failed", {
-          file: "worker/index.ts",
-          line: 65,
-          function: "processor",
-          jobId: job.id,
-          error,
-        });
-        throw error;
+        const handler = this.registeredTasks.get(job.name);
+        if (!handler) {
+          throw new Error(`No handler registered for task ${job.name}`);
+        }
+
+        try {
+          logger.debug("🚀 Worker: Processing task", {
+            file: "worker/index.ts",
+            line: 40,
+            function: "processor",
+            jobId: job.id,
+            name: job.name,
+            group: job.data.options?.group,
+            handler: handler.prototype,
+          });
+
+          const result = await handler(...(job.data.args ?? job.data));
+
+          this.observer.notify(
+            ObserverEvent.TASK_COMPLETED,
+            job.id!,
+            TaskStatus.COMPLETED,
+            result
+          );
+
+          // If task belongs to a group, notify completion and process next task
+          if (job.data.options?.group && this.queueManager) {
+            this.observer.notify(
+              ObserverEvent.TASK_COMPLETED,
+              job.id!,
+              TaskStatus.COMPLETED,
+              result
+            );
+            await this.queueManager.completeGroupTask(
+              job.id!,
+              job.data.options.group
+            );
+
+            logger.debug("✅ Worker: Group task completed", {
+              file: "worker/index.ts",
+              line: 55,
+              function: "processor",
+              jobId: job.id,
+              group: job.data.options.group,
+            });
+          }
+        } catch (error) {
+          logger.error("❌ Worker: Task processing failed", {
+            file: "worker/index.ts",
+            line: 65,
+            function: "processor",
+            jobId: job.id,
+            error,
+          });
+          throw error;
+        }
+      },
+      {
+        connection: redis,
+        ...config,
       }
-    }, {
-      connection: redis,
-      ...config,
-    });
+    );
 
     this.observer = new TaskObserver(redis);
     this.setObservers(this.observer);
@@ -96,11 +116,13 @@ export class Worker extends BullWorker {
 
     try {
       const group = await this.queueManager.getGroup(job.data.options.group);
-      const nextTaskId = await group.getNextTask();
-      
+      const nextTask = await group.getNextTask();
+      if (!nextTask) return false;
+      const [nextTaskId, queueName] = nextTask;
+
       // Only process if this task is next in line
       const canProcess = nextTaskId === job.id;
-      
+
       if (!canProcess) {
         logger.debug("⏳ Worker: Task not next in group", {
           file: "worker/index.ts",
@@ -109,6 +131,7 @@ export class Worker extends BullWorker {
           jobId: job.id,
           group: job.data.options.group,
           nextTaskId,
+          queueName,
         });
       }
 
@@ -135,20 +158,40 @@ export class Worker extends BullWorker {
 
   setObservers(observer: TaskObserver): void {
     this.observer = observer;
-    this.on('completed', async (job, result) => {
-      this.observer.notify(ObserverEvent.TASK_COMPLETED, job!.id as string, TaskStatus.COMPLETED, result);
+    this.on("completed", async (job, result) => {
+      this.observer.notify(
+        ObserverEvent.TASK_COMPLETED,
+        job!.id as string,
+        TaskStatus.COMPLETED,
+        result
+      );
     });
 
-    this.on('failed', (job, result) => {
-      this.observer.notify(ObserverEvent.TASK_FAILED, job!.id as string, TaskStatus.FAILED, result);
+    this.on("failed", (job, result) => {
+      this.observer.notify(
+        ObserverEvent.TASK_FAILED,
+        job!.id as string,
+        TaskStatus.FAILED,
+        result
+      );
     });
 
-    this.on('progress', (job, progress) => {
-      this.observer.notify(ObserverEvent.TASK_PROGRESS, job.id as string, TaskStatus.ACTIVE, progress);
+    this.on("progress", (job, progress) => {
+      this.observer.notify(
+        ObserverEvent.TASK_PROGRESS,
+        job.id as string,
+        TaskStatus.ACTIVE,
+        progress
+      );
     });
 
-    this.on('stalled', (job, result) => {
-      this.observer.notify(ObserverEvent.TASK_STALLED, job! as string, TaskStatus.STALLED, result);
+    this.on("stalled", (job, result) => {
+      this.observer.notify(
+        ObserverEvent.TASK_STALLED,
+        job! as string,
+        TaskStatus.STALLED,
+        result
+      );
     });
   }
 
