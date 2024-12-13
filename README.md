@@ -7,6 +7,9 @@ A distributed task queue system that's seriously powerful (but doesn't take itse
 
 ![Cleo Logo](docs/apps/web/public/og.jpg)
 
+## Docs
+
+- [Cleo Docs](https://cleo.theboring.name)
 
 ## Features ✨
 
@@ -114,17 +117,6 @@ graph TB
     style Deliver fill:#fbf,stroke:#333
 ```
 
-## Quick Start 🏃‍♂️
-
-```typescript
-// The fastest way to get your tasks running
-// (faster than a developer spotting a semicolon error)
-import { QueueManager } from '@cleo/core';
-
-const queue = new QueueManager();
-await queue.addTask('make-coffee', { priority: 'HIGH' }); // ☕
-```
-
 ## Installation 🛠️
 
 ```bash
@@ -132,6 +124,171 @@ npm install @cleo/core
 # or if you're yarn-core'd
 yarn add @cleo/core
 ```
+
+## Quick Start 🏃‍♂️
+
+## Examples 🎮
+(Because the best way to learn is by doing!)
+
+### Quick Start 🚀
+```typescript
+import { Cleo } from '@cleo/core';
+
+// Get your Cleo instance (it's like a task-managing pet)
+const cleo = Cleo.getInstance();
+
+// Configure it (give it treats and training)
+cleo.configure({
+  redis: {
+    host: "localhost",
+    port: 6379,
+    password: "cleosecret",
+  },
+  worker: {
+    concurrency: 4,
+    queues: [
+      {
+        name: "send-email",
+        priority: TaskPriority.HIGH,
+      },
+    ],
+  },
+});
+
+// Monitor your tasks (helicopter parenting, but for code)
+const queueManager = cleo.getQueueManager();
+queueManager.onTaskEvent(ObserverEvent.STATUS_CHANGE, (taskId, status, data) => {
+  console.log(`Task ${taskId} status changed to ${status}`, data);
+});
+```
+
+### Task Decorators 🎀
+```typescript
+import { task } from "@cleo/core";
+
+class EmailService {
+  @task({
+    id: "send-email",
+    priority: TaskPriority.HIGH,
+    queue: 'send-email',
+  })
+  async sendEmail(input: { email: string }): Promise<string> {
+    // Your email sending logic here
+    return `Sent to ${input.email}`;
+  }
+}
+```
+
+### Advanced Group Processing 🎭
+```typescript
+import { QueueClass, GroupProcessingStrategy } from "@cleo/core";
+
+// Define a service with group settings
+@QueueClass({
+  defaultOptions: {
+    maxRetries: 3,
+    retryDelay: 1000,
+    backoff: {
+      type: "fixed",
+      delay: 2000,
+    },
+    group: "notifications",
+    timeout: 300000,
+  },
+  queue: "notifications",
+})
+class NotificationService {
+  async sendPushNotification(data: { message: string }) {
+    console.log(`📱 Sending push: ${data.message}`);
+    return `Notification sent: ${data.message}`;
+  }
+
+  async sendSMS(data: { message: string }) {
+    console.log(`📲 Sending SMS: ${data.message}`);
+    return `SMS sent: ${data.message}`;
+  }
+}
+
+// Use different processing strategies
+const queueManager = cleo.getQueueManager();
+
+// Round Robin (taking turns like a proper queue)
+queueManager.setGroupProcessingStrategy(GroupProcessingStrategy.ROUND_ROBIN);
+
+// FIFO (first in, first out, just like a coffee shop)
+queueManager.setGroupProcessingStrategy(GroupProcessingStrategy.FIFO);
+
+// Priority (VIP treatment for important tasks)
+queueManager.setGroupProcessingStrategy(GroupProcessingStrategy.PRIORITY);
+await queueManager.setGroupPriority("notifications", 10);
+```
+
+### Error Handling & Retries 🛟
+```typescript
+// Built-in retry configuration
+@QueueClass({
+  defaultOptions: {
+    maxRetries: 3,
+    backoff: {
+      type: "fixed",
+      delay: 2000,
+    },
+    retryDelay: 1000,
+  }
+})
+class ReliableService {
+  async mightFail() {
+    // Will retry 3 times with backoff
+    throw new Error("Oops!");
+  }
+}
+
+// Manual retry with backoff
+import { RetryWithBackoff } from "@cleo/core";
+
+const result = await retryWithBackoff(
+  async () => {
+    return await unreliableOperation();
+  },
+  3,    // max retries
+  1000  // base delay in ms
+);
+```
+
+### Event Monitoring 📊
+```typescript
+const queueManager = cleo.getQueueManager();
+
+// Monitor all the things!
+queueManager.onTaskEvent(ObserverEvent.STATUS_CHANGE, (taskId, status, data) => {
+  console.log(`💬 Task ${taskId} status: ${status}`);
+});
+
+queueManager.onTaskEvent(ObserverEvent.GROUP_CHANGE, (taskId, status, data) => {
+  console.log(`👥 Group operation: ${data.operation}`);
+});
+
+queueManager.onTaskEvent(ObserverEvent.TASK_COMPLETED, (taskId, status, result) => {
+  console.log(`✅ Task ${taskId} completed:`, result);
+});
+
+queueManager.onTaskEvent(ObserverEvent.TASK_FAILED, (taskId, status, error) => {
+  console.log(`❌ Task ${taskId} failed:`, error);
+});
+```
+
+### Complete Examples 📚
+
+Check out our example files for full implementations:
+- [Basic Usage](packages/core/examples/basic.ts) - Simple task processing with monitoring
+- [Advanced Features](packages/core/examples/advanced.ts) - Group processing, strategies, and error handling
+
+Each example comes with:
+- 🎯 Complete setup and configuration
+- 📊 Event monitoring setup
+- 🎭 Different processing strategies
+- 🛠️ Error handling patterns
+- 📈 Performance monitoring
 
 ## Contributing 🤝
 
