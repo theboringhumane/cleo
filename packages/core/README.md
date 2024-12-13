@@ -1,285 +1,180 @@
-# Cleo - Advanced Task Queue Management System 🚀
+# Cleo 🚀
+![Cleo Logo](docs/apps/web/public/logo.svg)
 
-![Cleo Logo](../../docs/apps/web/public/logo.svg)
+> Why did the task queue go to therapy? It had too many unresolved promises! 😅
 
-Cleo is a powerful, Redis-based distributed task queue management system with advanced group processing capabilities, real-time monitoring, and sophisticated task orchestration.
+A distributed task queue system that's seriously powerful (but doesn't take itself too seriously 🎭).
 
-![Cleo Logo](../../docs/apps/web/public/og.jpg)
-
-> **🚧 Under Development:** Cleo is currently in active development. Features and APIs may change. Stay tuned for updates!
+![Cleo Logo](docs/apps/web/public/og.jpg)
 
 
-> **Note:** We're based on BullMQ, but with some added features and improvements. See the [BullMQ docs](https://docs.bullmq.io/) for more information but we'll cover the main differences here.
+## Features ✨
 
-## Features 🌟
+- **Task Grouping** 🎯 - Because some tasks are more social than others
+- **Distributed Locking** 🔐 - No queue jumping allowed!
+- **Retry with Backoff** 🔄 - If at first you don't succeed... we got you covered
+- **Redis-Backed** 📦 - Because memory is fleeting, but Redis is forever
+- **TypeScript Support** 💪 - For when `any` just won't cut it
 
-### Core Features
-- 🔄 Distributed task processing with automatic load balancing
-- 👥 Advanced group task management with multiple processing strategies
-- 📊 Real-time task monitoring and event-driven updates
-- 🎯 Priority-based processing with dynamic adjustments
-- ⚡ Event-driven architecture using Redis pub/sub
-- 🛡️ Built-in error handling with configurable retries
-- 📈 Comprehensive task statistics and metrics
+### Core Superpowers 💫
 
-### Group Processing Strategies
-- 🔄 Round Robin: Fair task distribution across groups for balanced processing
-- 📝 FIFO: Sequential processing within groups for ordered execution
-- ⭐ Priority: Dynamic priority-based processing with group weights
+#### Task Processing 🎯
+- 🚀 Distributed processing with auto load balancing
+- 🎭 Group task management (for tasks that play well with others)
+- 📊 Real-time monitoring (because we're all a bit nosy)
+- ⭐ Priority-based processing (some tasks are just more important)
+- ⚡ Event-driven architecture (Redis pub/sub magic)
+- 🛡️ Built-in error handling (because stuff happens)
+- 📈 Performance metrics (for the data nerds)
+
+#### Group Processing Strategies 🎲
+- 🔄 **Round Robin**: Fair play for all tasks
+- 📝 **FIFO**: First in, first out (no cutting in line!)
+- ⭐ **Priority**: VIP tasks get VIP treatment
+- 🎯 **Dynamic**: Adapts faster than a developer during a production incident
+
+#### Advanced Features 🔬
+- 🎯 **Smart Batching**
+  - Groups tasks like a pro party planner
+  - Optimizes performance like a caffeine-powered compiler
+  - Handles bursts better than your morning coffee machine
+
+- 📊 **Real-time Analytics**
+  - Success/failure tracking (keeping score)
+  - Processing time stats (for the speed demons)
+  - Resource usage metrics (watching the diet)
+  - Performance insights (big brain time)
+
+#### Security & Protection 🛡️
+- 🔐 Redis ACL support (because sharing isn't always caring)
+- 🎯 Task-level permissions (not everyone gets a backstage pass)
+- 📝 Audit logging (tracking who did what)
+- 🔑 Role-based access (VIP list management)
 
 ## System Architecture 🏗️
+(Where all the magic happens ✨)
 
 ```mermaid
 graph TB
-    Client[Client Application] --> Decorator[Task Decorator]
-    Decorator --> QM[Queue Manager]
-    QM --> Redis[(Redis)]
-    QM --> Worker[Worker Pool]
-    QM --> Observer[Task Observer]
-    QM --> Groups[Task Groups]
+    Client[🖥️ Client] --> QM[📊 Queue Manager]
+    QM --> Redis[(💾 Redis)]
+    QM --> Worker[👷 Worker Pool]
+    QM --> Groups[👥 Task Groups]
     Worker --> Redis
-    Observer --> Redis
     Groups --> Redis
     
-    subgraph "Event System"
-        Observer --> Events((Event Bus))
-        Events --> Monitoring[Monitoring System]
-        Events --> Logging[Logging System]
-        Events --> Metrics[Metrics Collection]
+    subgraph "🎭 Task Party"
+        Groups --> Strategy{🎯 Strategy}
+        Strategy --> RR[🔄 Round Robin]
+        Strategy --> FIFO[📝 FIFO]
+        Strategy --> Priority[⭐ Priority]
     end
 
-    subgraph "Group Processing"
-        Groups --> Strategy{Strategy Manager}
-        Strategy --> RR[Round Robin]
-        Strategy --> FIFO[FIFO]
-        Strategy --> Priority[Priority]
-    end
-
-    subgraph "Worker Pool"
-        Worker --> W1[Worker 1]
-        Worker --> W2[Worker 2]
-        Worker --> W3[Worker 3]
+    subgraph "💪 Worker Squad"
+        Worker --> W1[🏃 Worker 1]
+        Worker --> W2[🏃‍♀️ Worker 2]
+        Worker --> W3[🏃‍♂️ Worker 3]
     end
 ```
 
-## Task Processing Flow 🔄
+## Task Flow 🌊
+(AKA: The Epic Journey of a Task)
 
 ```mermaid
 sequenceDiagram
-    participant C as Client
-    participant D as Decorator
-    participant QM as Queue Manager
-    participant G as Task Group
-    participant W as Worker
-    participant R as Redis
-    participant O as Observer
+    participant C as 🖥️ Client
+    participant QM as 📊 Queue
+    participant G as 👥 Group
+    participant W as 👷 Worker
+    participant R as 💾 Redis
 
-    C->>D: Call Method
-    D->>QM: Decorate & Submit
-    QM->>G: Check Group
-    G->>R: Store Group State
-    QM->>R: Queue Task
-    
-    Note over W,R: Continuous Processing
-    W->>R: Poll for Tasks
-    W->>G: Check Group Order
-    G->>R: Verify Next Task
-    W->>QM: Process Task
-    QM->>O: Emit Events
-    O->>R: Update Status
-    O->>C: Notify Completion
+    C->>QM: Submit Task 📬
+    QM->>G: Group Check 🔍
+    G->>R: Store State 💾
+    QM->>R: Queue Task ➡️
+    W->>R: Poll Tasks 🎣
+    W->>G: Check Order 📋
+    W->>QM: Process ⚙️
+    QM->>C: Done! 🎉
 ```
 
-## Real-World Use Cases 🌍
+## Real-World Examples 🌍
+(Because who doesn't love practical examples?)
 
-### Video Processing Pipeline 🎥
+### Video Processing 🎥
 ```mermaid
 graph TB
-    Upload[Upload Video] --> Validate[Validate Format]
-    Validate --> Split[Split Segments]
-    Split --> Parallel
+    Upload[📤 Upload] --> Process[⚙️ Process]
+    Process --> Encode[🎬 Encode]
+    Encode --> Deliver[🚀 Deliver]
     
-    subgraph Parallel[Parallel Processing]
-        Transcode[Transcode Video]
-        Audio[Process Audio]
-        Thumbnail[Generate Thumbnails]
-    end
-    
-    Parallel --> Merge[Merge Streams]
-    Merge --> Optimize[Optimize Output]
-    Optimize --> CDN[Push to CDN]
-    
-    subgraph "Group: Video Pipeline"
-        direction TB
-        Validate
-        Split
-        Parallel
-        Merge
-        Optimize
-        CDN
-    end
+    style Upload fill:#f9f,stroke:#333
+    style Process fill:#bbf,stroke:#333
+    style Encode fill:#bfb,stroke:#333
+    style Deliver fill:#fbf,stroke:#333
 ```
 
-### E-commerce Order Processing 🛍️
-```mermaid
-graph TB
-    Order[New Order] --> Validate[Validate Order]
-    Validate --> Stock[Check Stock]
-    Stock --> Payment[Process Payment]
-    
-    Payment --> Parallel
-    
-    subgraph Parallel[Parallel Processing]
-        Invoice[Generate Invoice]
-        Label[Create Shipping Label]
-        Email[Send Email]
-        SMS[Send SMS]
-    end
-    
-    Parallel --> Warehouse[Warehouse Notification]
-    Warehouse --> Track[Initialize Tracking]
-    
-    subgraph "Group: Order Processing"
-        direction TB
-        Validate
-        Stock
-        Payment
-        Parallel
-        Warehouse
-        Track
-    end
+## Quick Start 🏃‍♂️
+
+```typescript
+// The fastest way to get your tasks running
+// (faster than a developer spotting a semicolon error)
+import { QueueManager } from '@cleo/core';
+
+const queue = new QueueManager();
+await queue.addTask('make-coffee', { priority: 'HIGH' }); // ☕
 ```
 
-### AI Training Pipeline 🤖
-```mermaid
-graph TB
-    Data[Data Collection] --> Clean[Data Cleaning]
-    Clean --> Feature[Feature Engineering]
-    Feature --> Split[Train/Test Split]
-    
-    Split --> Training
-    
-    subgraph Training[Training Pipeline]
-        Model[Train Model]
-        Validate[Cross Validation]
-        Tune[Hyperparameter Tuning]
-    end
-    
-    Training --> Evaluate[Model Evaluation]
-    Evaluate --> Deploy[Model Deployment]
-    
-    subgraph "Group: ML Pipeline"
-        direction TB
-        Clean
-        Feature
-        Split
-        Training
-        Evaluate
-        Deploy
-    end
+## Installation 🛠️
+
+```bash
+npm install @cleo/core
+# or if you're yarn-core'd
+yarn add @cleo/core
 ```
 
-## Advanced Features 🔧
+## Contributing 🤝
 
-### Task Grouping Capabilities
-- 🔄 **Dynamic Group Creation**
-  - Auto-scaling groups
-  - Group merging and splitting
-  - Dynamic priority adjustment
+We welcome contributions! Whether you're fixing bugs 🐛, adding features ✨, or improving docs 📚, we'd love your help!
 
-- 📊 **Group Statistics**
-  - Real-time metrics
-  - Performance analytics
-  - Resource utilization
+> Q: How many developers does it take to review a PR?
+> A: None, they're all stuck in an infinite loop of bikeshedding! 😄
 
-- 🎯 **Processing Strategies**
-  - Adaptive batch processing
-  - Smart task routing
-  - Load-based scaling
+Check out our [Contributing Guidelines](CONTRIBUTING.md) for:
+- Code style and standards 📝
+- Development workflow 🔄
+- Project structure 🏗️
+- Pull request process 🔍
+- Bug reporting guidelines 🐞
 
-### Event System Architecture 🎯
+### Key Components 🔧
+
+Our project is like a well-oiled machine (that occasionally needs coffee):
+- **QueueManager** 📊 - The traffic controller of your tasks
+- **TaskGroup** 👥 - Because tasks work better in teams
+- **Worker** 🏃 - The real MVP doing all the heavy lifting
+- **Utilities** 🛠️ - Our Swiss Army knife of helper functions
+
+## Performance Features ⚡
+(Because speed matters!)
 
 ```mermaid
-graph TB
-    Task[Task Execution] --> Events{Event Bus}
+graph LR
+    A[📊 Smart Batching] --> B[⚡ Fast Processing]
+    B --> C[🎯 Optimal Results]
+    C --> D[🎉 Happy Users]
     
-    Events --> Status[Status Updates]
-    Events --> Progress[Progress Events]
-    Events --> System[System Events]
-    
-    subgraph "Status Events"
-        Status --> Created[Task Created]
-        Status --> Started[Task Started]
-        Status --> Completed[Task Completed]
-        Status --> Failed[Task Failed]
-    end
-    
-    subgraph "Progress Events"
-        Progress --> Percent[Percentage Update]
-        Progress --> Stage[Stage Complete]
-        Progress --> Milestone[Milestone Reached]
-    end
-    
-    subgraph "System Events"
-        System --> Worker[Worker Status]
-        System --> Queue[Queue Metrics]
-        System --> Resource[Resource Usage]
-    end
+    style A fill:#f96,stroke:#333
+    style B fill:#9cf,stroke:#333
+    style C fill:#9f9,stroke:#333
+    style D fill:#f9f,stroke:#333
 ```
 
-## Performance Optimizations ⚡
-
-### Redis Integration
-- 📊 Efficient data structures for task storage
-- 🔄 Pub/Sub for real-time event propagation
-- 💾 Atomic operations for data consistency
-- 🔍 Smart caching strategies
-
-### Worker Management
-- 🔄 Dynamic worker scaling
-- 📈 Intelligent load balancing
-- 🚦 Adaptive rate limiting
-- 🎯 Resource-aware task distribution
-
-### Group Processing
-- 🎯 Predictive task batching
-- 📊 Dynamic priority adjustment
-- 🔄 Efficient task ordering
-- ⚡ Pipeline optimization
-
-## Security Features 🔒
-
-### Authentication & Authorization
-- 🔐 Redis ACL support
-- 🛡️ Task-level permissions
-- 📝 Audit logging
-- 🔑 Role-based access control
-
-### Data Protection
-- 🔒 Encryption at rest
-- 🔐 Secure task data handling
-- 🛡️ Input validation
-- 📝 Data sanitization
-
-## Monitoring & Debugging 🔍
-
-### Real-time Metrics
-- 📊 Task success/failure rates
-- ⏱️ Processing time analytics
-- 🎯 Group performance metrics
-- 📈 Resource utilization stats
-
-### Logging System
-- 📝 Structured logging
-- 🚨 Error tracking
-- 📊 Performance profiling
-- 🔍 Debug information
-
-## Installation & Setup 🛠️
-
-Docs web app: https://cleo.theboring.name/docs
-
-## License 📄
+## License 📜
 
 MIT License - see LICENSE file for details
-```
+
+> Remember: In a world of callbacks, promises, and async/await, we're all just trying our best to avoid race conditions! 🏁
+
+---
+Made with ❤️ and probably too much caffeine ☕
