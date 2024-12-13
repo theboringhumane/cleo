@@ -2,7 +2,7 @@ import { unstable_setRequestLocale } from 'next-intl/server'
 
 import type { LocaleOptions } from '@/lib/opendocs/types/i18n'
 import type { Metadata, Viewport } from 'next'
-
+import { Analytics } from '@vercel/analytics/next';
 import '@/styles/globals.css'
 
 import { getObjectValueByLocale } from '@/lib/opendocs/utils/locale'
@@ -144,6 +144,7 @@ export default function RootLayout({ children, params }: AppLayoutProps) {
 
             <div className="fixed left-0 top-0 size-full bg-gradient-to-b from-[#a277ff] via-transparent to-transparent opacity-10" />
           </div>
+          <Analytics />
         </ThemeProvider>
       </body>
     </html>
