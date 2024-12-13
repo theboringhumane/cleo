@@ -133,7 +133,6 @@ async function demonstrateRoundRobin() {
   ];
 
   await Promise.all(tasks);
-  await new Promise(resolve => setTimeout(resolve, 8000));
 }
 
 async function demonstrateFIFO() {
@@ -148,7 +147,6 @@ async function demonstrateFIFO() {
   ];
 
   await Promise.all(tasks);
-  await new Promise(resolve => setTimeout(resolve, 8000));
 }
 
 async function demonstratePriority() {
@@ -167,7 +165,6 @@ async function demonstratePriority() {
   ];
 
   await Promise.all(tasks);
-  await new Promise(resolve => setTimeout(resolve, 8000));
 }
 
 async function demonstrateErrorHandling() {
@@ -183,7 +180,6 @@ async function demonstrateErrorHandling() {
   ];
 
   await Promise.all(tasks);
-  await new Promise(resolve => setTimeout(resolve, 8000));
 }
 
 // Main demonstration
