@@ -20,8 +20,9 @@ export class Worker extends BullWorker {
     super(
       queueName,
       async (job: Job) => {
+        const group = job.data.options?.group;
         // Check if task belongs to a group and if it's allowed to be processed
-        if (job.data.options?.group) {
+        if (group) {
           const canProcess = await this.canProcessGroupedTask(job);
           if (!canProcess) {
             logger.debug("⏳ Worker: Task waiting in group", {
@@ -29,7 +30,7 @@ export class Worker extends BullWorker {
               line: 25,
               function: "processor",
               jobId: job.id,
-              group: job.data.options.group,
+              group: group,
             });
             // Delay the task and put it back in the queue
             await job.moveToDelayed(Date.now() + 1000);
@@ -49,30 +50,36 @@ export class Worker extends BullWorker {
             function: "processor",
             jobId: job.id,
             name: job.name,
-            group: job.data.options?.group,
+            group: group,
             handler: handler.prototype,
+            data: job.data.args ?? job.data,
           });
 
-          const result = await handler(...(job.data.args ?? job.data));
+          let data = job.data.args ?? job.data;
 
-          this.observer.notify(
-            ObserverEvent.TASK_COMPLETED,
-            job.id!,
-            TaskStatus.COMPLETED,
-            result
-          );
+          if (data.hasOwnProperty("data")) {
+            data = data.data;
+          }
+
+          const result = await handler(...data);
 
           // If task belongs to a group, notify completion and process next task
-          if (job.data.options?.group && this.queueManager) {
+          if (group && this.queueManager) {
             this.observer.notify(
               ObserverEvent.TASK_COMPLETED,
               job.id!,
               TaskStatus.COMPLETED,
-              result
+              {
+                data: {
+                  group: group,
+                  result,
+                },
+              }
             );
+            
             await this.queueManager.completeGroupTask(
               job.id!,
-              job.data.options.group
+              group
             );
 
             logger.debug("✅ Worker: Group task completed", {
@@ -80,10 +87,11 @@ export class Worker extends BullWorker {
               line: 55,
               function: "processor",
               jobId: job.id,
-              group: job.data.options.group,
+              group: group,
             });
           }
         } catch (error) {
+          console.log(error);
           logger.error("❌ Worker: Task processing failed", {
             file: "worker/index.ts",
             line: 65,
@@ -105,44 +113,52 @@ export class Worker extends BullWorker {
   }
 
   private async canProcessGroupedTask(job: Job): Promise<boolean> {
-    if (!this.queueManager) {
-      logger.warn("⚠️ Worker: QueueManager not connected", {
-        file: "worker/index.ts",
-        line: 75,
-        function: "canProcessGroupedTask",
-      });
-      return false;
-    }
+    if (!this.queueManager) return false;
 
+    const group = job.data.options.group;
+    
     try {
-      const group = await this.queueManager.getGroup(job.data.options.group);
-      const nextTask = await group.getNextTask();
-      if (!nextTask) return false;
-      const [nextTaskId, queueName] = nextTask;
+      const acquired = await this.queueManager.acquireGroupLock(
+        group,
+        job.id!,
+        5000 // 5 second lock
+      );
 
-      // Only process if this task is next in line
-      const canProcess = nextTaskId === job.id;
-
-      if (!canProcess) {
-        logger.debug("⏳ Worker: Task not next in group", {
-          file: "worker/index.ts",
-          line: 90,
-          function: "canProcessGroupedTask",
-          jobId: job.id,
-          group: job.data.options.group,
-          nextTaskId,
-          queueName,
-        });
+      if (!acquired) {
+        return false;
       }
 
-      return canProcess;
+      try {
+        const taskGroup = await this.queueManager.getGroup(group);
+        const nextTask = await taskGroup.getNextTask();
+        
+        if (!nextTask) {
+          return false;
+        }
+
+        const [nextTaskId, queueName] = nextTask;
+        const canProcess = nextTaskId === job.id;
+
+        if (!canProcess) {
+          // Put task back if it's not next
+          await taskGroup.addTask(
+            job.name,
+            job.data.options,
+            job.data
+          );
+        }
+
+        return canProcess;
+
+      } finally {
+        await this.queueManager.releaseGroupLock(group, job.id!);
+      }
+
     } catch (error) {
       logger.error("❌ Worker: Failed to check group task status", {
         file: "worker/index.ts",
-        line: 100,
         function: "canProcessGroupedTask",
-        jobId: job.id,
-        error,
+        error
       });
       return false;
     }
@@ -163,7 +179,12 @@ export class Worker extends BullWorker {
         ObserverEvent.TASK_COMPLETED,
         job!.id as string,
         TaskStatus.COMPLETED,
-        result
+        {
+          data: {
+            group: job.data?.options?.group,
+            result,
+          },
+        }
       );
     });
 

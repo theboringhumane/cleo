@@ -379,11 +379,13 @@ export class QueueManager {
       groupName,
     });
 
+    task.options.group = groupName;
+
     this.observer.notify(
       ObserverEvent.TASK_ADDED,
       taskId,
       TaskStatus.WAITING,
-      task
+      task,
     );
   }
 
@@ -585,10 +587,10 @@ export class QueueManager {
   private setupTaskObservers(): void {
     // Listen for task additions to groups
     this.observer.subscribe(
-      ObserverEvent.GROUP_CHANGE,
+      ObserverEvent.TASK_ADDED,
       (taskId, status, data) => {
-        if (data.operation === GroupOperation.ADD) {
-          this.activeGroups.add(data.group);
+        if (data?.options?.group) {
+          this.activeGroups.add(data.options.group);
           if (!this.isProcessing) {
             this.processGroupTasks().catch(console.error);
           }
@@ -600,11 +602,12 @@ export class QueueManager {
     this.observer.subscribe(
       ObserverEvent.TASK_COMPLETED,
       async (taskId, status, data) => {
-        if (data.group) {
-          const group = await this.getGroup(data.group);
+        const groupName = data?.options?.group ?? data?.group;
+        if (groupName) {
+          const group = await this.getGroup(groupName);
           const hasMoreTasks = await group.hasAvailableTasks();
           if (!hasMoreTasks) {
-            this.activeGroups.delete(data.group);
+            this.activeGroups.delete(groupName);
           }
         }
       }
@@ -614,13 +617,14 @@ export class QueueManager {
     this.observer.subscribe(
       ObserverEvent.TASK_FAILED,
       async (taskId, status, data) => {
-        if (data.group) {
+        const groupName = data?.options?.group ?? data?.group;
+        if (groupName) {
           logger.error("❌ QueueManager: Task failed in group", {
             file: "queueManager.ts",
             line: 70,
             function: "setupTaskObservers",
             taskId,
-            group: data.group,
+            group: groupName,
             error: data.error,
           });
         }
@@ -643,63 +647,55 @@ export class QueueManager {
   }
 
   private async processTask(task: Task, groupName: string): Promise<void> {
+    const lockValue = Date.now().toString();
+    
     try {
-      logger.info("🚀 ~ processTask ~ task", {
-        file: "queueManager.ts",
-        line: 576,
-        function: "processTask",
-        task,
-      });
-      const worker = this.getWorker(task.options.queue || "default");
-      const handler = worker.getTaskHandler(task.name);
+      const acquired = await this.acquireGroupLock(groupName, lockValue);
 
-      if (!handler) {
-        throw new Error(`No handler found for task ${task.id}`);
+      if (!acquired) {
+        logger.debug("🔒 QueueManager: Could not acquire group lock", {
+          file: "queueManager.ts",
+          function: "processTask",
+          groupName,
+          taskId: task.id
+        });
+        return;
       }
 
-      // Process task
-      const result = await handler(...(task.data.args ?? task.data));
-      task.result = result;
-      task.state = TaskState.COMPLETED;
+      const queueName = task.options.queue || "default";
+      await this.ensureTaskInQueue(task, queueName);
+      task.state = TaskState.WAITING;
       await this.updateTask(task);
 
-      // Update group status and notify observers
-      const group = await this.getGroup(groupName);
-      await group.completeTask(task.id);
-
-      this.observer.notify(
-        ObserverEvent.TASK_COMPLETED,
-        task.id,
-        TaskStatus.COMPLETED,
-        {
-          group: groupName,
-          result,
-        }
-      );
     } catch (error) {
-      task.state = TaskState.FAILED;
-      task.error = error instanceof Error ? error.message : String(error);
-      await this.updateTask(task);
+      logger.error("❌ QueueManager: Task processing failed", {
+        file: "queueManager.ts", 
+        function: "processTask",
+        error
+      });
+      throw error;
+    } finally {
+      await this.releaseGroupLock(groupName, lockValue);
+    }
+  }
 
-      this.observer.notify(
-        ObserverEvent.TASK_FAILED,
-        task.id,
-        TaskStatus.FAILED,
-        {
-          group: groupName,
-          error: task.error,
-        }
-      );
+  // Add new method to ensure task is in queue
+  async ensureTaskInQueue(task: Task, queueName: string): Promise<void> {
+    const queue = this.getQueue(queueName);
+    if (!queue) {
+      throw new Error(`Queue ${queueName} not found`);
+    }
+    const existingJob = await queue.getJob(task.id);
+
+    if (!existingJob) {
+      await queue.add(task.name, task.data, {
+        jobId: task.id,
+        ...task.options,
+      });
     }
   }
 
   async updateTask(task: Task): Promise<void> {
-    console.log("🚀 ~ updateTask ~ task", {
-      file: "queueManager.ts",
-      line: 685,
-      function: "updateTask",
-      task,
-    });
     const queueName = task.options.queue || "default";
     const queue = this.queues.get(queueName);
 
@@ -784,5 +780,23 @@ export class QueueManager {
       this.activeGroups.delete(groupName);
       this.groupInfos.delete(groupName);
     }
+  }
+
+  async acquireGroupLock(groupName: string, holder: string, ttlMs: number = 5000): Promise<boolean> {
+    const lockKey = `group:${groupName}:lock`;
+    const result = await this.redis.set(lockKey, holder, 'EX', Math.ceil(ttlMs/1000));
+    return result === 'OK';
+  }
+
+  async releaseGroupLock(groupName: string, holder: string): Promise<void> {
+    const lockKey = `group:${groupName}:lock`;
+    const script = `
+      if redis.call("get", KEYS[1]) == ARGV[1] then
+        return redis.call("del", KEYS[1])
+      else
+        return 0
+      end
+    `;
+    await this.redis.eval(script, 1, lockKey, holder);
   }
 }

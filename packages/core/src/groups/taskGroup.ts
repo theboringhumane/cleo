@@ -4,6 +4,7 @@ import { logger } from "../utils/logger";
 import type { Task, TaskOptions } from "../types/interfaces";
 import type { Worker } from "../workers";
 import { QueueManager } from "../queue/queueManager";
+import { retryWithBackoff } from '../utils/retryWithBackoff';
 
 export interface GroupStats {
   total: number;
@@ -384,24 +385,10 @@ export class TaskGroup {
       task.state = TaskState.ACTIVE;
       await this.queueManager.updateTask(task);
 
-      // Process the task using the worker
-      const handler = this.worker.getTaskHandler(task.name);
-      if (!handler) {
-        throw new Error(`No handler found for task ${task.name}`);
-      }
+      // Instead of processing directly, ensure the task is in the queue
+      // The Worker will pick it up when it's ready and this task is next in line
+      await this.queueManager.ensureTaskInQueue(task, queueName);
 
-      try {
-        const result = await handler(...(task.data.args ?? task.data));
-        task.result = result;
-        task.state = TaskState.COMPLETED;
-        await this.completeTask(nextTaskId);
-      } catch (error) {
-        task.state = TaskState.FAILED;
-        task.error = error instanceof Error ? error.message : String(error);
-        await this.updateTaskStatus(nextTaskId, TaskStatus.FAILED);
-      }
-
-      await this.queueManager.updateTask(task);
     } catch (error) {
       logger.error("❌ TaskGroup: failed to process next task", {
         file: "taskGroup.ts",
@@ -490,36 +477,48 @@ export class TaskGroup {
   }
 
   async getNextTask(): Promise<[string, string] | null> {
-    try {
-      const tasks = await this.redis.zrange(this.processingOrderKey, 0, 0);
-      if (tasks.length === 0) return null;
-      const nextTask = tasks[0];
-      await this.redis.zrem(this.processingOrderKey, nextTask);
-      await this.redis.sadd(this.processingKey, nextTask);
+    return retryWithBackoff(async () => {
+      const multi = this.redis.multi();
+      
+      try {
+        await this.redis.watch(this.processingOrderKey);
+        
+        const tasks = await this.redis.zrange(this.processingOrderKey, 0, 0);
+        if (tasks.length === 0) {
+          await this.redis.unwatch();
+          return null;
+        }
+        
+        const nextTask = tasks[0];
+        
+        multi.zrem(this.processingOrderKey, nextTask);
+        multi.sadd(this.processingKey, nextTask);
+        
+        const results = await multi.exec();
+        
+        if (!results) {
+          logger.debug("⚠️ TaskGroup: Concurrent modification detected", {
+            file: "taskGroup.ts",
+            function: "getNextTask"
+          });
+          throw new Error('Concurrent modification detected');
+        }
 
-      // get task options and get queue name
-      const taskOptions = await this.getTaskOptionsAndData(nextTask);
-      if (!taskOptions) return null;
-      const { options } = taskOptions;
-      const queueName = options.queue;
+        const taskOptions = await this.getTaskOptionsAndData(nextTask);
+        if (!taskOptions) return null;
+        
+        const { options } = taskOptions;
+        return [nextTask, options.queue!];
 
-      logger.info("⏭️ TaskGroup: next task selected", {
-        file: "taskGroup.ts",
-        line: 220,
-        function: "getNextTask",
-        taskId: nextTask,
-      });
-
-      return [nextTask, queueName!];
-    } catch (error) {
-      logger.error("❌ TaskGroup: failed to get next task", {
-        file: "taskGroup.ts",
-        line: 230,
-        function: "getNextTask",
-        error,
-      });
-      throw error;
-    }
+      } catch (error) {
+        logger.error("❌ TaskGroup: Failed to get next task", {
+          file: "taskGroup.ts",
+          function: "getNextTask",
+          error
+        });
+        throw error;
+      }
+    }, 3, 100);
   }
 
   async completeTask(taskId: string): Promise<void> {
