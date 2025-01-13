@@ -17,6 +17,7 @@ class Cleo {
   protected queueManager: QueueManager | null = null;
   private isConfigured = false;
   private readonly instanceId: RedisInstance;
+  public task: typeof task = task;
 
   constructor(instanceId: RedisInstance = RedisInstance.DEFAULT) {
     this.instanceId = instanceId;
@@ -112,9 +113,6 @@ class Cleo {
   getWorker(queueName: string): Worker {
     return this.queueManager!.getWorker(queueName);
   }
-
-  // Method decorator
-  task = task;
 }
 
 // Export the core functionality
@@ -125,6 +123,7 @@ export {
   WorkerConfig,
   QueueMetrics,
   redisConnection,
+  task,
 };
 
 // Export the queue manager
@@ -161,7 +160,11 @@ export { Worker } from './workers';
  * 
  * // Subscribe to task events
  * queueManager.onTaskEvent(ObserverEvent.STATUS_CHANGE, (taskId, status, data) => {
- *   console.log(`Task ${taskId} status changed to ${status}`);
+ *   logger.info('File: index.ts 📝, Line: 8, Function: onTaskEvent; Task status changed', {
+ *     taskId,
+ *     status,
+ *     data
+ *   });
  * });
  * 
  * // Create a task group and add tasks
@@ -170,7 +173,15 @@ export { Worker } from './workers';
  * 
  * // Get all tasks in a group
  * const tasks = await queueManager.getGroupTasks('important-tasks');
+ * logger.info('File: index.ts 📋, Line: 17, Function: example; Retrieved group tasks', { 
+ *   groupName: 'important-tasks',
+ *   tasks 
+ * });
  * 
  * // Remove a task from a group
  * await queueManager.removeTaskFromGroup('task-1', 'important-tasks');
+ * logger.info('File: index.ts 🗑️, Line: 23, Function: example; Removed task from group', {
+ *   taskId: 'task-1',
+ *   groupName: 'important-tasks'
+ * });
  */
