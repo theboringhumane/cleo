@@ -11,7 +11,7 @@
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "outDir": "./dist",
-    "rootDir": ".",
+    "rootDir": "./src",
     "declaration": true,
     "resolveJsonModule": true,
     "moduleResolution": "node",
@@ -26,11 +26,11 @@
   },
   "include": [
     "src/**/*",
-    "examples/**/*"
   ],
   "exclude": [
     "node_modules",
     "dist",
-    "**/*.test.ts"
+    "**/*.test.ts",
+    "examples/**/*"
   ]
 }
