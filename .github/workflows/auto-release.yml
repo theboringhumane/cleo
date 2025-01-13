@@ -3,7 +3,7 @@ name: 🐳 Build and Push Docker Image 🦀
 on:
   push:
     branches:
-      - sudo
+      - master
 
 jobs:
   create-release:
