@@ -7,14 +7,11 @@
   ],
   "scripts": {
     "build:core": "yarn workspace @cleo/core build",
-    "build:dashboard": "yarn workspace @cleo/dashboard build",
     "build:docs": "yarn workspace @cleo/docs build",
     "start:core": "yarn workspace @cleo/core start",
-    "start:dashboard": "yarn workspace @cleo/dashboard start",
     "start:docs": "yarn workspace @cleo/docs start",
-    "start": "concurrently \"yarn start:core\" \"yarn start:dashboard\" \"yarn start:docs\"",
+    "start": "concurrently \"yarn start:core\" \"yarn start:docs\"",
     "dev:core": "yarn workspace @cleo/core dev",
-    "dev:dashboard": "yarn workspace @cleo/dashboard dev",
     "dev:docs": "yarn workspace @cleo/docs dev",
     "example:basic": "yarn workspace @cleo/example-basic start"
   }

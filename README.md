@@ -56,7 +56,6 @@ A distributed task queue system that's seriously powerful (but doesn't take itse
 
 ## System Architecture 🏗️
 (Where all the magic happens ✨)
-
 ```mermaid
 graph TB
     Client[🖥️ Client] --> QM[📊 Queue Manager]
