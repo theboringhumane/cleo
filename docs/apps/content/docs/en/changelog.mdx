@@ -7,6 +7,38 @@ description: Track the latest updates and changes to Cleo.
 
 All notable changes to Cleo will be documented in this file.
 
+## [1.1.0-alpha] - 2025-03-13
+
+### 🚀 New Features
+- Enhanced task decorator with improved event filtering and lifecycle management
+- Added exponential and fixed backoff strategies for retries
+- Introduced task weights for group priority management
+- Added comprehensive worker metrics and task history tracking
+- Implemented group state change events
+- Added support for Redis key prefixing for multi-tenant setups
+
+### 🔧 Improvements
+- Enhanced group task processing with better error handling
+- Improved task event handling with filtered notifications
+- Added task history with group information
+- Enhanced worker monitoring capabilities
+- Improved graceful shutdown procedures
+- Added support for queue-specific concurrency limits
+
+### 🐛 Bug Fixes
+- Fixed race conditions in group task processing
+- Resolved issues with duplicate event notifications
+- Fixed memory leaks in long-running workers
+- Improved error handling in task decorators
+- Fixed task timeout handling
+
+### 📚 Documentation
+- Updated API reference with new configuration options
+- Added comprehensive examples for group processing
+- Improved best practices documentation
+- Added scaling guidelines
+- Enhanced monitoring documentation
+
 ## [1.0.0-alpha] - 2024-03-20
 
 > **Note:** Cleo is currently in active development. Features and APIs may change.

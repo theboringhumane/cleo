@@ -13,28 +13,31 @@ A distributed task queue system that's seriously powerful (but doesn't take itse
 
 ## Features ✨
 
-- **Task Grouping** 🎯 - Because some tasks are more social than others
+- **Enhanced Task Grouping** 🎯 - Smart task coordination with multiple processing strategies
+- **Intelligent Task Decorators** 🎀 - Auto-filtering events and lifecycle management
 - **Distributed Locking** 🔐 - No queue jumping allowed!
-- **Retry with Backoff** 🔄 - If at first you don't succeed... we got you covered
+- **Advanced Retry with Backoff** 🔄 - Smart retries with configurable strategies
 - **Redis-Backed** 📦 - Because memory is fleeting, but Redis is forever
 - **TypeScript Support** 💪 - For when `any` just won't cut it
+- **Real-time Event System** 📡 - Keep track of your tasks with detailed events
+- **Task History & Analytics** 📊 - Complete visibility into task lifecycles
 
 ### Core Superpowers 💫
 
 #### Task Processing 🎯
 - 🚀 Distributed processing with auto load balancing
-- 🎭 Group task management (for tasks that play well with others)
-- 📊 Real-time monitoring (because we're all a bit nosy)
-- ⭐ Priority-based processing (some tasks are just more important)
-- ⚡ Event-driven architecture (Redis pub/sub magic)
-- 🛡️ Built-in error handling (because stuff happens)
-- 📈 Performance metrics (for the data nerds)
+- 🎭 Smart group task management with multiple strategies
+- 📊 Enhanced real-time monitoring with filtered events
+- ⭐ Dynamic priority-based processing
+- ⚡ Event-driven architecture with detailed task history
+- 🛡️ Robust error handling and retry mechanisms
+- 📈 Comprehensive performance metrics and analytics
 
 #### Group Processing Strategies 🎲
-- 🔄 **Round Robin**: Fair play for all tasks
-- 📝 **FIFO**: First in, first out (no cutting in line!)
-- ⭐ **Priority**: VIP tasks get VIP treatment
-- 🎯 **Dynamic**: Adapts faster than a developer during a production incident
+- 🔄 **Round Robin**: Fair distribution with last-processed time tracking
+- 📝 **FIFO**: Strict order processing with complete task history
+- ⭐ **Priority**: Dynamic priority adjustment with group statistics
+- 🎯 **Smart Processing**: Adapts to task patterns and system load
 
 #### Advanced Features 🔬
 - 🎯 **Smart Batching**
@@ -89,15 +92,54 @@ sequenceDiagram
     participant G as 👥 Group
     participant W as 👷 Worker
     participant R as 💾 Redis
+    participant E as 📡 Events
 
     C->>QM: Submit Task 📬
     QM->>G: Group Check 🔍
     G->>R: Store State 💾
+    G->>R: Update Processing Order 🔄
     QM->>R: Queue Task ➡️
     W->>R: Poll Tasks 🎣
-    W->>G: Check Order 📋
+    W->>G: Check Strategy 📋
+    G-->>E: Emit Status Change 📻
     W->>QM: Process ⚙️
+    QM-->>E: Emit Task Events 📡
     QM->>C: Done! 🎉
+
+    Note over G,R: Group maintains processing order
+    Note over W,QM: Worker respects group strategy
+    Note over E: Event system provides real-time updates
+```
+
+## Task Group Processing 🎭
+(How tasks play nice together)
+
+```mermaid
+graph TB
+    Task[📦 Task] --> Group[👥 Group]
+    Group --> Strategy{🎯 Strategy}
+    
+    Strategy --> RR[🔄 Round Robin]
+    Strategy --> FIFO[📝 FIFO]
+    Strategy --> Priority[⭐ Priority]
+    
+    RR --> Redis[(💾 Redis)]
+    FIFO --> Redis
+    Priority --> Redis
+    
+    Redis --> History[📊 Task History]
+    Redis --> Stats[📈 Group Stats]
+    
+    subgraph "📡 Event System"
+        History --> Events[🔔 Events]
+        Stats --> Events
+    end
+    
+    style Task fill:#f96,stroke:#333
+    style Group fill:#9cf,stroke:#333
+    style Strategy fill:#f9f,stroke:#333
+    style Redis fill:#9f9,stroke:#333
+    style Events fill:#ff9,stroke:#333
 ```
 
 ## Real-World Examples 🌍
@@ -170,12 +212,22 @@ class EmailService {
     id: "send-email",
     priority: TaskPriority.HIGH,
     queue: 'send-email',
+    group: 'notifications',
+    timeout: 30000,
+    maxRetries: 3,
+    retryDelay: 3000,
   })
   async sendEmail(input: { email: string }): Promise<string> {
     // Your email sending logic here
     return `Sent to ${input.email}`;
   }
 }
+
+// Task decorator automatically:
+// - Filters task events by taskId
+// - Manages task lifecycle within groups
+// - Handles cancellation through AbortSignal
+// - Provides automatic cleanup of event listeners
 ```
 
 ### Advanced Group Processing 🎭
@@ -208,18 +260,31 @@ class NotificationService {
   }
 }
 
-// Use different processing strategies
+// Enhanced Group Processing Features
 const queueManager = cleo.getQueueManager();
 
-// Round Robin (taking turns like a proper queue)
+// Round Robin - Fair distribution with last-processed time tracking
 queueManager.setGroupProcessingStrategy(GroupProcessingStrategy.ROUND_ROBIN);
 
-// FIFO (first in, first out, just like a coffee shop)
+// FIFO - Strict order processing with task history
 queueManager.setGroupProcessingStrategy(GroupProcessingStrategy.FIFO);
 
-// Priority (VIP treatment for important tasks)
+// Priority - Dynamic priority adjustment with group stats
 queueManager.setGroupProcessingStrategy(GroupProcessingStrategy.PRIORITY);
 await queueManager.setGroupPriority("notifications", 10);
+
+// New: Group Task Event Handling
+queueManager.onTaskEvent(ObserverEvent.GROUP_CHANGE, (taskId, status, data) => {
+  // Enhanced group event data including:
+  // - Task history
+  // - Group processing stats
+  // - Task completion/failure details
+  console.log(`👥 Group operation for ${taskId}:`, {
+    operation: data.operation,
+    group: data.group,
+    history: data.history
+  });
+});
 ```
 
 ### Error Handling & Retries 🛟

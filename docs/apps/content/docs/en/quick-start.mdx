@@ -1,6 +1,6 @@
 ---
 title: Quick Start Guide
-description: Get started with Cleo in minutes. Learn how to install, configure and run your first distributed task.
+description: Get started with Cleo in minutes. Learn how to install, configure, and leverage advanced features like task groups and event handling.
 ---
 
 # ⚡ Quick Start - Zero to Hero in 5 Minutes!
@@ -10,13 +10,15 @@ description: Get started with Cleo in minutes. Learn how to install, configure a
 ```bash
 # Install Cleo
 npm install @cleotasks/core
+
+# Or using yarn
+yarn add @cleotasks/core
 ```
 
 ## 🎯 Basic Configuration
 
 ```typescript
-import { Cleo } from "@cleotasks/core";
-import { TaskPriority } from "@cleotasks/core/types/enums";
+import { Cleo, TaskPriority, GroupProcessingStrategy } from "@cleotasks/core";
 
 // Get Cleo instance
 const cleo = Cleo.getInstance();
@@ -32,62 +34,150 @@ cleo.configure({
     concurrency: 4,
     queues: [
       {
-        name: "send-email",
+        name: "notifications",
         priority: TaskPriority.HIGH,
       },
     ],
   },
 });
+
+// Get queue manager for task handling
+const queueManager = cleo.getQueueManager();
+
+// Configure group processing strategy
+queueManager.setGroupProcessingStrategy(GroupProcessingStrategy.ROUND_ROBIN);
 ```
 
-## 🎨 Creating Your First Task
+## 🎨 Creating Tasks with Decorators
 
 ```typescript
-import { task } from "@cleotasks/core/decorators/task";
+import { task, QueueClass } from "@cleotasks/core";
 
+// Individual task with specific configuration
 class EmailService {
   @task({
     id: "send-email",
     priority: TaskPriority.HIGH,
-    queue: 'send-email',
+    queue: 'notifications',
+    group: 'emails',
+    timeout: 30000,
+    maxRetries: 3,
+    retryDelay: 3000,
   })
-  sendEmail(input: { email: string }): Promise<string> {
-    return Promise.resolve(`Sent to ${input.email}`);
+  async sendEmail(input: { email: string, template: string }): Promise<string> {
+    // Your email sending logic here
+    return `Sent to ${input.email} using ${input.template}`;
   }
 }
 
-// Create service instance
+// Class-level configuration for all methods
+@QueueClass({
+  defaultOptions: {
+    maxRetries: 3,
+    retryDelay: 1000,
+    backoff: {
+      type: "exponential",
+      delay: 2000,
+    },
+    group: "notifications",
+    timeout: 300000,
+  },
+  queue: "notifications",
+})
+class NotificationService {
+  async sendPushNotification(data: { userId: string, message: string }) {
+    // Push notification logic
+    return `Push sent to ${data.userId}`;
+  }
+
+  async sendSMS(data: { phone: string, message: string }) {
+    // SMS logic
+    return `SMS sent to ${data.phone}`;
+  }
+}
+
+// Create service instances
 const emailService = new EmailService();
+const notificationService = new NotificationService();
 ```
 
-## 📊 Monitoring Tasks
+## 📡 Event Monitoring
 
 ```typescript
-import { ObserverEvent } from "@cleotasks/core/types/enums";
+import { ObserverEvent } from "@cleotasks/core";
 
-// Get queue manager for monitoring
-const queueManager = cleo.getQueueManager();
-
-// Set up observers for monitoring
-queueManager.onTaskEvent(ObserverEvent.STATUS_CHANGE, (taskId, status, data) => {
-  console.log(`Task ${taskId} status changed to ${status}`, data);
-});
-
-queueManager.onTaskEvent(ObserverEvent.TASK_ADDED, (taskId, status, data) => {
-  console.log(`Task ${taskId} added to queue`, status, data);
-});
-
+// Monitor task lifecycle events
 queueManager.onTaskEvent(ObserverEvent.TASK_COMPLETED, (taskId, status, data) => {
-  console.log(`Task ${taskId} completed`, status, data);
+  console.log(`✅ Task ${taskId} completed:`, {
+    result: data?.result,
+    group: data?.group
+  });
+});
+
+// Monitor group operations
+queueManager.onTaskEvent(ObserverEvent.GROUP_CHANGE, (taskId, status, data) => {
+  console.log(`👥 Group operation:`, {
+    taskId,
+    operation: data.operation,
+    group: data.group,
+    history: data.history
+  });
+});
+
+// Monitor task failures with retry information
+queueManager.onTaskEvent(ObserverEvent.TASK_FAILED, (taskId, status, data) => {
+  console.log(`❌ Task ${taskId} failed:`, {
+    error: data?.error,
+    retryCount: data?.retryCount,
+    nextRetry: data?.nextRetry
+  });
 });
 ```
 
 ## 🚀 Running Tasks
 
 ```typescript
-// Execute the task
-await emailService.sendEmail({ email: "test@test.com" });
+// Execute tasks with automatic group handling
+await emailService.sendEmail({
+  email: "user@example.com",
+  template: "welcome"
+});
 
+await notificationService.sendPushNotification({
+  userId: "user123",
+  message: "Welcome aboard!"
+});
+
+// Get group statistics
+const groupStats = await (await queueManager.getGroup("notifications")).getStats();
+console.log("📊 Group Stats:", {
+  total: groupStats.total,
+  active: groupStats.active,
+  completed: groupStats.completed,
+  failed: groupStats.failed
+});
+
+// Get task history
+const worker = cleo.getWorker("notifications");
+const taskHistory = await worker.getTaskHistory();
+console.log("📜 Task History:", taskHistory);
+```
+
+## 🧹 Cleanup
+
+```typescript
 // Clean up event listeners when done
 queueManager.offTaskEvent(ObserverEvent.TASK_COMPLETED);
+queueManager.offTaskEvent(ObserverEvent.GROUP_CHANGE);
+queueManager.offTaskEvent(ObserverEvent.TASK_FAILED);
+
+// Close connections
+await cleo.getQueueManager().close();
 ```
+
+## 🎯 What's Next?
+
+Check out these guides to dive deeper:
+- [Core Concepts](./core-concepts) - Learn about task groups and processing strategies
+- [Best Practices](./best-practices) - Tips for production deployments
+- [API Reference](./api-reference) - Complete API documentation

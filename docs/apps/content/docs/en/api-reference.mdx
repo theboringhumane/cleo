@@ -24,14 +24,23 @@ cleo.configure({
   redis: {
     host: string;
     port: number;
-    password: string;
+    password?: string;
     tls?: boolean;
+    db?: number;
+    keyPrefix?: string;
   },
   worker: {
-    concurrency: number;
-    queues: {
+    concurrency?: number;
+    maxMemoryUsage?: number;
+    prefix?: string;
+    queues?: {
       name: string;
       priority: TaskPriority;
+      rateLimit?: {
+        max: number;
+        interval: number;
+      };
+      concurrency?: number;
     }[];
   }
 });
@@ -50,6 +59,15 @@ import { task } from "@cleotasks/core/decorators/task";
   queue?: string;
   maxRetries?: number;
   retryDelay?: number;
+  backoff?: {
+    type: "exponential" | "fixed";
+    delay: number;
+  };
+  timeout?: number;
+  schedule?: RepeatOptions;
+  group?: string;
+  removeOnComplete?: boolean;
+  weight?: number;
 })
 ```
 
@@ -59,13 +77,22 @@ import { task } from "@cleotasks/core/decorators/task";
 import { QueueClass } from "@cleotasks/core/decorators/class";
 
 @QueueClass({
-  defaultOptions: {
+  defaultOptions?: {
     priority?: TaskPriority;
     maxRetries?: number;
     retryDelay?: number;
+    backoff?: {
+      type: "exponential" | "fixed";
+      delay: number;
+    };
     group?: string;
+    timeout?: number;
   },
   queue?: string;
+  includeInherited?: boolean;
+  exclude?: string[];
+  include?: string[];
+  group?: string;
 })
 ```
 
@@ -84,6 +111,12 @@ queueManager.offTaskEvent(event: ObserverEvent);
 queueManager.setGroupProcessingStrategy(strategy: GroupProcessingStrategy);
 queueManager.setGroupPriority(groupId: string, priority: number);
 queueManager.getGroup(groupId: string): Promise<Group>;
+queueManager.getAllGroups(): Promise<string[]>;
+
+// Task Management
+queueManager.addTask(name: string, data: any, options?: TaskOptions): Promise<Task>;
+queueManager.getTask(taskId: string, queueName?: string): Promise<Task | null>;
+queueManager.removeTask(taskId: string, queueName?: string): Promise<boolean>;
 ```
 
 ## Task Events
@@ -94,7 +127,12 @@ enum ObserverEvent {
   TASK_ADDED = "task_added",
   TASK_COMPLETED = "task_completed",
   TASK_FAILED = "task_failed",
-  GROUP_CHANGE = "group_change"
+  GROUP_CHANGE = "group_change",
+  GROUP_STATE_CHANGE = "group_state_change"
+}
+
+interface TaskEventCallback {
+  (taskId: string, status: TaskStatus, data?: any): void | Promise<void>;
 }
 ```
 
@@ -106,6 +144,47 @@ enum GroupProcessingStrategy {
   FIFO = "fifo",
   PRIORITY = "priority"
 }
+
+interface GroupConfig {
+  name: string;
+  concurrency?: number;
+  maxConcurrency?: number;
+  rateLimit?: {
+    max: number;
+    duration: number;
+  };
+  priority?: number;
+  strategy?: GroupProcessingStrategy;
+  retryDelay?: number;
+  retryLimit?: number;
+  timeout?: number;
+}
+```
+
+## Worker Management
+
+```typescript
+interface WorkerConfig {
+  concurrency?: number;
+  maxMemoryUsage?: number;
+  prefix?: string;
+  queues?: QueueConfig[];
+}
+
+interface WorkerMetrics {
+  tasksProcessed: number;
+  tasksSucceeded: number;
+  tasksFailed: number;
+  averageProcessingTime: number;
+  totalProcessingTime?: number;
+}
+
+// Worker API
+const worker = cleo.getWorker("queueName");
+await worker.getStatus(): Promise<string>;
+await worker.getActiveTasks(): Promise<string[]>;
+await worker.getMetrics(): Promise<WorkerMetrics>;
+await worker.getTaskHistory(): Promise<TaskHistoryEntry[]>;
 ```
 
 ## Types

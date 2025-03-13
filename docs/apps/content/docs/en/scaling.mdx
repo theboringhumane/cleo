@@ -1,268 +1,217 @@
 ---
 title: Scaling Guide
-description: Learn how to scale your Cleo task processing system from development to production.
+description: Learn how to scale Cleo for high-performance task processing, including worker configuration, Redis optimization, and monitoring strategies.
 ---
 
-# 🚀 Scaling Guide
+# 📈 Scaling Cleo
 
-## Understanding Cleo's Architecture
+## Architecture Overview
 
-Cleo is built on a distributed architecture using Redis as its backbone, allowing for horizontal scaling and high availability.
+Cleo is designed for horizontal scalability, leveraging Redis as its backbone for distributed task processing. Here's how different components scale:
 
-### Basic Architecture
+```mermaid
+graph TD
+    A[Tasks] --> B[Queue Manager]
+    B --> C[Redis]
+    C --> D[Worker Pool]
+    D --> E[Worker 1]
+    D --> F[Worker 2]
+    D --> G[Worker N]
+    H[Monitoring] --> C
+```
+
+## Worker Scaling
+
+### Configuration
+
 ```typescript
-import { Cleo } from "@cleotasks/core";
-import { TaskPriority } from "@cleotasks/core/types/enums";
+cleo.configure({
+  worker: {
+    // Adjust based on CPU cores and task nature
+    concurrency: 10,
+    // Prevent memory leaks
+    maxMemoryUsage: 1024 * 1024 * 1024, // 1GB
+    // Queue-specific settings
+    queues: [
+      {
+        name: "high-priority",
+        priority: TaskPriority.HIGH,
+        concurrency: 5,
+        rateLimit: {
+          max: 1000,
+          interval: 60000 // per minute
+        }
+      },
+      {
+        name: "low-priority",
+        priority: TaskPriority.LOW,
+        concurrency: 2
+      }
+    ]
+  }
+});
+```
 
-// Basic single-worker configuration
-const cleo = Cleo.getInstance();
+### Best Practices
+
+1. **Worker Concurrency**
+   - Start with `concurrency = number of CPU cores`
+   - Monitor CPU and memory usage
+   - Adjust based on task types (I/O vs CPU bound)
+
+2. **Memory Management**
+   ```typescript
+   cleo.configure({
+     worker: {
+       maxMemoryUsage: 1024 * 1024 * 512, // 512MB
+       // Implement graceful shutdown
+       onMemoryExceeded: async (worker) => {
+         await worker.pause();
+         await worker.drain();
+         process.exit(0);
+       }
+     }
+   });
+   ```
+
+3. **Queue Prioritization**
+   ```typescript
+   queueManager.setGroupProcessingStrategy(GroupProcessingStrategy.PRIORITY);
+   await queueManager.setGroupPriority("critical-tasks", 10);
+   await queueManager.setGroupPriority("background-tasks", 1);
+   ```
+
+## Redis Optimization
+
+### Configuration
+
+```typescript
 cleo.configure({
   redis: {
-    host: "localhost",
+    host: "redis.example.com",
     port: 6379,
-    password: "cleosecret",
-  },
-  worker: {
-    concurrency: 4,
-    queues: [
-      {
-        name: "default",
-        priority: TaskPriority.NORMAL,
-      },
-    ],
-  },
-});
-```
-
-## 🔄 Scaling Strategies
-
-### 1. Group-Based Scaling
-
-```typescript
-@QueueClass({
-  defaultOptions: {
-    priority: TaskPriority.NORMAL,
-    maxRetries: 3,
-    retryDelay: 1000,
-    group: "user1",
-  },
-  queue: "notifications",
-})
-class NotificationService {
-  // Task methods...
-}
-
-// Configure group processing strategy
-queueManager.setGroupProcessingStrategy(GroupProcessingStrategy.ROUND_ROBIN);
-```
-
-### 2. Priority-Based Scaling
-
-```typescript
-// Configure multiple priority queues
-cleo.configure({
-  worker: {
-    queues: [
-      { name: "critical", priority: TaskPriority.HIGH },
-      { name: "normal", priority: TaskPriority.NORMAL },
-      { name: "background", priority: TaskPriority.LOW },
-    ],
-  },
-});
-```
-
-### 3. Concurrent Processing
-
-```typescript
-// Scale by increasing concurrency
-cleo.configure({
-  worker: {
-    concurrency: 10, // Increase based on CPU cores
-    queues: [
-      {
-        name: "heavy-processing",
-        concurrency: 5, // Queue-specific concurrency
-      },
-    ],
-  },
-});
-```
-
-## 📊 Monitoring Scaled Systems
-
-### Task Event Monitoring
-
-```typescript
-const queueManager = cleo.getQueueManager();
-
-// Monitor task lifecycle
-queueManager.onTaskEvent(ObserverEvent.STATUS_CHANGE, (taskId, status, data) => {
-  console.log(`Task ${taskId} status: ${status}`);
-});
-
-// Monitor group performance
-queueManager.onTaskEvent(ObserverEvent.GROUP_CHANGE, (taskId, status, data) => {
-  console.log(`Group operation: ${data.operation}`);
-});
-```
-
-### Group Statistics
-
-```typescript
-async function monitorGroups() {
-  const group = await queueManager.getGroup("user1");
-  const stats = await group.getStats();
-  
-  console.log("Group Statistics:", {
-    completedTasks: stats.completed,
-    failedTasks: stats.failed,
-    processingTime: stats.avgProcessingTime,
-  });
-}
-```
-
-## 🎯 Best Practices for Scaling
-
-### 1. Resource Management
-
-```typescript
-@QueueClass({
-  defaultOptions: {
-    maxRetries: 3,
-    retryDelay: 1000,
-  },
-})
-class ResourceAwareService {
-  async processTask(data: any) {
-    // Implement resource-aware processing
-    const available = await checkResourceAvailability();
-    if (!available) {
-      throw new ResourceUnavailableError();
-    }
-    // Process task...
-  }
-}
-```
-
-### 2. Error Handling at Scale
-
-```typescript
-@QueueClass({
-  defaultOptions: {
-    maxRetries: 3,
-    retryDelay: 1000,
-    group: "critical",
-  },
-})
-class ReliableService {
-  async processWithRetry(data: any) {
-    try {
-      return await this.process(data);
-    } catch (error) {
-      // Log error and retry strategy
-      throw error; // Let Cleo handle retry logic
-    }
-  }
-}
-```
-
-## 🚀 Production Deployment Tips
-
-### 1. Redis Configuration
-
-```typescript
-// Production Redis setup
-cleo.configure({
-  redis: {
-    host: process.env.REDIS_HOST,
-    port: parseInt(process.env.REDIS_PORT || "6379"),
-    password: process.env.REDIS_PASSWORD,
+    // Enable TLS for security
     tls: true,
+    // Use key prefix for multi-tenant setups
+    keyPrefix: "tenant1:",
+    // Connection pool settings
     maxRetriesPerRequest: 3,
-  },
+    enableReadyCheck: false,
+    maxReconnectAttempts: 10
+  }
 });
 ```
 
-### 2. Worker Distribution
+### Best Practices
+
+1. **Connection Management**
+   - Use connection pools
+   - Implement retry strategies
+   - Monitor connection health
+
+2. **Data Persistence**
+   - Configure appropriate RDB/AOF settings
+   - Implement backup strategies
+   - Monitor Redis memory usage
+
+3. **Multi-tenancy**
+   ```typescript
+   // Use key prefixes for isolation
+   const tenant1 = Cleo.getInstance("tenant1");
+   tenant1.configure({
+     redis: {
+       keyPrefix: "tenant1:",
+       db: 0
+     }
+   });
+   ```
+
+## Monitoring & Health Checks
+
+### Worker Metrics
 
 ```typescript
-// Configure multiple workers
-const workerConfigs = [
-  { name: "critical-worker", queues: ["critical"] },
-  { name: "normal-worker", queues: ["normal", "background"] },
-];
-
-workerConfigs.forEach(config => {
-  cleo.configure({
-    worker: {
-      name: config.name,
-      queues: config.queues.map(q => ({
-        name: q,
-        priority: getPriorityForQueue(q),
-      })),
-    },
-  });
+const worker = cleo.getWorker("queue-name");
+const metrics = await worker.getMetrics();
+console.log({
+  tasksProcessed: metrics.tasksProcessed,
+  tasksSucceeded: metrics.tasksSucceeded,
+  tasksFailed: metrics.tasksFailed,
+  averageProcessingTime: metrics.averageProcessingTime
 });
 ```
 
-## 📈 Performance Monitoring
-
-### 1. Queue Metrics
+### Group Monitoring
 
 ```typescript
-async function monitorQueueHealth() {
-  const queueManager = cleo.getQueueManager();
-  
-  // Monitor queue sizes
-  const queues = await queueManager.getQueues();
-  for (const queue of queues) {
-    const stats = await queue.getStats();
-    console.log(`Queue ${queue.name}:`, {
-      waiting: stats.waiting,
-      active: stats.active,
-      completed: stats.completed,
-      failed: stats.failed,
-    });
+const group = await queueManager.getGroup("critical-tasks");
+const stats = await group.getStats();
+console.log({
+  total: stats.total,
+  active: stats.active,
+  completed: stats.completed,
+  failed: stats.failed,
+  paused: stats.paused
+});
+```
+
+### Health Checks
+
+```typescript
+// Implement health checks
+queueManager.startHealthCheck(30000); // Every 30 seconds
+
+queueManager.on("healthCheck", async (status) => {
+  if (status.redisLatency > 100) {
+    await notifyAdmin("High Redis latency detected");
+  }
+  if (status.failedTasks > threshold) {
+    await scaleWorkers(status.activeWorkers + 1);
+  }
+});
+```
+
+## Load Balancing
+
+### Task Distribution
+
+```typescript
+// Implement custom routing based on load
+class LoadBalancedTaskRouter {
+  async route(task: Task): Promise<string> {
+    const workers = await queueManager.getAllWorkers();
+    const metrics = await Promise.all(
+      workers.map(w => w.getMetrics())
+    );
+    return selectLeastLoadedWorker(workers, metrics);
   }
 }
 ```
 
-### 2. Worker Health
+### Auto-scaling
 
 ```typescript
-async function monitorWorkerHealth() {
-  const workers = await cleo.getWorkers();
-  for (const worker of workers) {
-    const health = await worker.getHealth();
-    console.log(`Worker ${worker.id}:`, {
-      status: health.status,
-      uptime: health.uptime,
-      activeJobs: health.activeJobs,
-    });
+// Implement auto-scaling based on metrics
+async function autoScale() {
+  const metrics = await queueManager.getLatestQueueMetrics();
+  if (metrics.waiting > threshold) {
+    await scaleWorkers(currentWorkers + 1);
+  }
+  if (metrics.waiting < lowThreshold) {
+    await scaleWorkers(currentWorkers - 1);
   }
 }
 ```
 
-## 🎯 Scaling Checklist
+## Production Checklist
 
-1. **Pre-scaling Assessment**
-   - Monitor current resource usage
-   - Identify bottlenecks
-   - Set performance baselines
-
-2. **Infrastructure Setup**
-   - Configure Redis appropriately
-   - Set up monitoring
-   - Plan worker distribution
-
-3. **Application Configuration**
-   - Optimize worker settings
-   - Configure group strategies
-   - Set up error handling
-
-4. **Monitoring Setup**
-   - Implement event listeners
-   - Track group statistics
-   - Monitor worker health
-
-Remember: Start with proper monitoring before scaling, and scale based on actual metrics rather than assumptions. 
+- [ ] Configure appropriate worker concurrency
+- [ ] Set up memory limits and monitoring
+- [ ] Implement graceful shutdown procedures
+- [ ] Configure Redis persistence and backups
+- [ ] Set up monitoring and alerting
+- [ ] Implement health checks
+- [ ] Configure rate limiting for stability
+- [ ] Set up load balancing
+- [ ] Implement auto-scaling policies
+- [ ] Monitor and optimize Redis performance 

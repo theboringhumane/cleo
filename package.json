@@ -3,7 +3,8 @@
   "private": true,
   "workspaces": [
     "packages/*",
-    "examples/*"
+    "examples/*",
+    "dashboard"
   ],
   "scripts": {
     "build:core": "yarn workspace @cleo/core build",

@@ -1,9 +1,37 @@
 ---
 title: Core Concepts
-description: "Learn the fundamental building blocks and concepts behind Cleo's distributed task processing system. This guide covers basic concepts, queue classes, group processing strategies, monitoring, and error handling."
+description: "Learn the fundamental building blocks and concepts behind Cleo's distributed task processing system. This guide covers task decorators, queue classes, group processing strategies, event handling, and error management."
 ---
 
 # 🧠 Core Concepts - The Building Blocks of Cleo
+
+## 🎀 Task Decorators
+
+The `@task` decorator provides fine-grained control over individual task execution:
+
+```typescript
+class EmailService {
+  @task({
+    id: "send-email",
+    priority: TaskPriority.HIGH,
+    queue: 'email',
+    group: 'notifications',
+    timeout: 30000,
+    maxRetries: 3,
+    retryDelay: 3000,
+  })
+  async sendEmail(input: { email: string }): Promise<string> {
+    return `Sent to ${input.email}`;
+  }
+}
+```
+
+Key features of task decorators:
+- Automatic event filtering by taskId
+- Task lifecycle management within groups
+- Cancellation support via AbortSignal
+- Automatic cleanup of event listeners
+- Configurable timeouts and retry strategies
 
 ## 🎯 Queue Classes
 
@@ -15,7 +43,12 @@ The `@QueueClass` decorator allows you to define service classes with shared que
     priority: TaskPriority.NORMAL,
     maxRetries: 3,
     retryDelay: 1000,
-    group: "user1",
+    backoff: {
+      type: "fixed",
+      delay: 2000,
+    },
+    group: "notifications",
+    timeout: 300000,
   },
   queue: "notifications",
 })
@@ -27,61 +60,118 @@ class NotificationService {
   async sendSMS(data: { message: string }) {
     // SMS sending logic
   }
-
-  async sendEmail(data: { message: string }) {
-    // Email sending logic
-  }
 }
 ```
 
 ## 🔄 Group Processing Strategies
 
-Cleo supports different strategies for processing grouped tasks:
+Cleo supports advanced strategies for processing grouped tasks:
 
 ### Round Robin Strategy
 ```typescript
+// Fair distribution with last-processed time tracking
 queueManager.setGroupProcessingStrategy(GroupProcessingStrategy.ROUND_ROBIN);
+
+// Tasks are processed in a circular order, ensuring fair distribution
+// The system tracks the last processing time for each task
 ```
 
 ### FIFO (First In, First Out) Strategy
 ```typescript
+// Strict order processing with task history
 queueManager.setGroupProcessingStrategy(GroupProcessingStrategy.FIFO);
+
+// Maintains complete task history
+// Ensures strict ordering of task execution
 ```
 
 ### Priority-based Strategy
 ```typescript
+// Dynamic priority adjustment with group statistics
 queueManager.setGroupProcessingStrategy(GroupProcessingStrategy.PRIORITY);
 
-// Set group priorities
-await queueManager.setGroupPriority("user1", 1);
-await queueManager.setGroupPriority("user2", 10); // Higher priority
+// Set and adjust group priorities
+await queueManager.setGroupPriority("notifications", 10);
+await queueManager.setGroupPriority("background", 1);
+```
+
+## 📡 Event System
+
+Cleo provides a comprehensive event system for task monitoring:
+
+```typescript
+// Monitor task lifecycle events
+queueManager.onTaskEvent(ObserverEvent.TASK_COMPLETED, (taskId, status, data) => {
+  console.log(`✅ Task ${taskId} completed:`, data?.result);
+});
+
+// Monitor group operations
+queueManager.onTaskEvent(ObserverEvent.GROUP_CHANGE, (taskId, status, data) => {
+  console.log(`👥 Group operation:`, {
+    taskId,
+    operation: data.operation,
+    group: data.group,
+    history: data.history
+  });
+});
 ```
 
 ## 📊 Monitoring and Statistics
 
-```typescript
-// Get group statistics
-const user1Stats = await (await queueManager.getGroup("user1")).getStats();
-const user2Stats = await (await queueManager.getGroup("user2")).getStats();
+Enhanced monitoring capabilities with detailed metrics:
 
-console.log("User 1 Stats:", user1Stats);
-console.log("User 2 Stats:", user2Stats);
+```typescript
+// Get comprehensive group statistics
+const groupStats = await (await queueManager.getGroup("notifications")).getStats();
+console.log("Group Stats:", {
+  total: groupStats.total,
+  active: groupStats.active,
+  completed: groupStats.completed,
+  failed: groupStats.failed,
+  paused: groupStats.paused
+});
+
+// Track task history
+const taskHistory = await worker.getTaskHistory();
+console.log("Task History:", taskHistory.map(entry => ({
+  taskId: entry.taskId,
+  status: entry.status,
+  duration: entry.duration,
+  timestamp: entry.timestamp,
+  group: entry.group
+})));
 ```
 
-## 🎯 Error Handling
+## 🛡️ Error Handling and Recovery
 
-Tasks can be configured to handle errors and retries:
+Robust error handling with configurable retry strategies:
 
 ```typescript
 @QueueClass({
   defaultOptions: {
     maxRetries: 3,
     retryDelay: 1000,
+    backoff: {
+      type: "exponential", // or "fixed"
+      delay: 2000,
+    },
+    timeout: 30000,
   }
 })
-class ErrorHandlingService {
-  async sendErrorTask(data: { message: string }) {
-    throw new Error('Simulated error in task');
+class ReliableService {
+  async processTask(data: any) {
+    try {
+      // Task logic here
+    } catch (error) {
+      // Error will trigger retry with backoff
+      throw error;
+    }
   }
 }
+
+// The system will:
+// 1. Automatically retry failed tasks
+// 2. Apply backoff strategy between retries
+// 3. Track retry attempts in task history
+// 4. Emit events for monitoring
 ``` 
