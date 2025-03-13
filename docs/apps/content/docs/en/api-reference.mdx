@@ -211,4 +211,176 @@ interface QueueClassOptions {
 }
 ```
 
+## REST API
+
+### Queue Routes
+
+```typescript
+// Get all queues
+GET /api/queues/get-all
+Response: {
+  queues: Array<{
+    name: string;
+    metrics: {
+      waiting: number;
+      active: number;
+      completed: number;
+      failed: number;
+    };
+    tasks: Task[];
+  }>;
+}
+
+// Get queue by name
+GET /api/queues/get-by-name/:queueName
+Response: {
+  tasks: Task[];
+  metrics: {
+    active: number;
+    waiting: number;
+    completed: number;
+    failed: number;
+  };
+}
+
+// Get task by ID
+GET /api/queues/get-task/:taskId
+Response: {
+  task: Task;
+  history: Array<{
+    timestamp: string;
+    state: string;
+    data?: any;
+  }>;
+}
+
+// Add task
+POST /api/queues/add-task
+Body: {
+  name: string;
+  data: any;
+  options: TaskOptions;
+}
+Response: Task
+
+// Remove task
+DELETE /api/queues/remove-task/:taskId
+Response: { success: boolean }
+
+// Get queue metrics
+GET /api/queues/:queueName/metrics
+Query: {
+  start?: number;
+  end?: number;
+}
+Response: {
+  metrics: Array<{
+    timestamp: string;
+    active: number;
+    waiting: number;
+    completed: number;
+    failed: number;
+  }>;
+}
+```
+
+### Group Routes
+
+```typescript
+// Get all groups
+GET /api/groups
+Response: {
+  groups: Array<{
+    name: string;
+    metrics: {
+      active: number;
+      waiting: number;
+      completed: number;
+      failed: number;
+    };
+  }>;
+}
+
+// Get tasks for a specific group
+GET /api/groups/:groupName/tasks
+Response: {
+  tasks: Task[];
+}
+
+// Add task to group
+POST /api/groups/:groupName/tasks
+Body: {
+  methodName: string;
+  data: any;
+  options: TaskOptions;
+}
+Response: { message: string }
+
+// Set group priority
+PUT /api/groups/:groupName/priority
+Body: {
+  priority: number;
+}
+Response: { message: string }
+
+// Get group stats
+GET /api/groups/:groupName/stats
+Response: {
+  stats: {
+    name: string;
+    total: number;
+    active: number;
+    completed: number;
+    failed: number;
+    paused: number;
+  };
+}
+```
+
+### Worker Routes
+
+```typescript
+// Get all workers
+GET /api/workers
+Query: {
+  queue?: string;
+}
+Response: {
+  workers: Array<{
+    id: string;
+    queue: string;
+    status: string;
+    activeTasks: any[];
+    metrics: {
+      tasksProcessed: number;
+      tasksSucceeded: number;
+      tasksFailed: number;
+      averageProcessingTime: number;
+    };
+    lastHeartbeat: string;
+    isActive: boolean;
+  }>;
+}
+
+// Get specific worker
+GET /api/workers/:workerId
+Response: {
+  id: string;
+  queue: string;
+  status: string;
+  activeTasks: string[];
+  metrics: WorkerMetrics;
+  lastHeartbeat: string;
+  isActive: boolean;
+  history?: TaskHistoryEntry[];
+}
+
+// Get worker metrics
+GET /api/workers/:workerId/metrics
+Response: {
+  current: WorkerMetrics;
+  history: Array<WorkerMetrics & { timestamp: string }>;
+}
+```
+
 For more detailed information about underlying queue features, job options, and advanced configurations, please refer to the [BullMQ documentation](https://docs.bullmq.io/). 
