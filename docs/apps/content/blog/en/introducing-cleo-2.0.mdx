@@ -1,89 +1,144 @@
 ---
-title: "Introducing Cleo: Advanced Task Queue Management System 🚀"
-date: 2024-03-20
+title: "Introducing Cleo 2.0: The Next Generation of Distributed Task Processing"
+description: "Discover the powerful new features and improvements in Cleo 2.0, including enhanced task decorators, smart group processing, comprehensive monitoring, and more."
+date: "2024-03-13"
 author_id: fofsinx
 tags: ["cleo", "task", "queue", "group", "processing", "monitoring", "orchestration"]
 excerpt: "Discover Cleo, a powerful Redis-based distributed task queue system with advanced group processing capabilities, real-time monitoring, and sophisticated task orchestration."
 ---
 
-# Introducing Cleo: Advanced Task Queue Management System 🚀
+# 🚀 Introducing Cleo 2.0
 
-We're excited to introduce Cleo, a powerful Redis-based distributed task queue system! Built with TypeScript and powered by BullMQ, Cleo brings advanced group processing capabilities and real-time monitoring to your task management needs.
+We're thrilled to announce the release of Cleo 2.0, a major update to our distributed task processing framework. This release brings significant improvements in task management, group processing, monitoring capabilities, and developer experience.
 
-## 🌟 Core Features
+## 🎯 Key Features
 
-### Group Processing
+### Enhanced Task Decorators
+
+The `@task` decorator now provides more granular control over task execution:
+
+```typescript
+@task({
+  id: "process-video",
+  priority: TaskPriority.HIGH,
+  queue: "media",
+  group: "video-processing",
+  backoff: {
+    type: "exponential",
+    delay: 1000
+  },
+  weight: 10,
+  removeOnComplete: true
+})
+```
+
+- **Smart Backoff Strategies**: Choose between exponential and fixed backoff for retries
+- **Task Weights**: Prioritize tasks within groups
+- **Auto-cleanup**: Automatically remove completed tasks
+- **Event Filtering**: Precise event handling with taskId filtering
+
+### Intelligent Group Processing
+
+Improved group processing with multiple strategies:
+
+- **Round Robin**: Fair distribution with last-processed time tracking
+- **FIFO**: Strict order processing with complete task history
+- **Priority-based**: Dynamic priority adjustment with group statistics
+
+### Comprehensive Monitoring
+
+Enhanced observability with detailed metrics:
+
+- **Worker Metrics**: Track processing time, success rates, and resource usage
+- **Group Statistics**: Monitor group performance and task distribution
+- **Task History**: Complete audit trail of task lifecycle events
+- **Real-time Events**: Comprehensive event system for monitoring
+
+### Production-Ready Features
+
+New capabilities for production deployments:
+
+- **Multi-tenant Support**: Redis key prefixing for tenant isolation
+- **Enhanced Security**: TLS support and secure Redis connections
+- **Rate Limiting**: Control processing rates at queue and group levels
+- **Graceful Shutdown**: Clean worker shutdown with task completion
+
+## 💡 Developer Experience
+
+We've focused on making Cleo more developer-friendly:
+
+### Simplified Configuration
+
+```typescript
+cleo.configure({
+  redis: {
+    host: "redis.example.com",
+    tls: true,
+    keyPrefix: "tenant1:"
+  },
+  worker: {
+    concurrency: 10,
+    maxMemoryUsage: 1024 * 1024 * 512
+  }
+});
+```
+
+### Intuitive Queue Classes
+
 ```typescript
 @QueueClass({
   defaultOptions: {
-    priority: TaskPriority.NORMAL,
-    maxRetries: 3,
-    group: "notifications",
+    queue: "notifications",
+    maxRetries: 3
   },
-  queue: "notifications",
+  includeInherited: true
 })
 class NotificationService {
-  @task({
-    id: "send-email",
-    priority: TaskPriority.HIGH,
-  })
-  async sendEmail(data: { email: string }) {
-    // Email sending logic
-  }
+  // Methods automatically become tasks
 }
 ```
 
-### Processing Strategies
+### Type-Safe Event Handling
+
 ```typescript
-// Configure different processing strategies
-queueManager.setGroupProcessingStrategy(GroupProcessingStrategy.ROUND_ROBIN);
-queueManager.setGroupProcessingStrategy(GroupProcessingStrategy.FIFO);
-queueManager.setGroupProcessingStrategy(GroupProcessingStrategy.PRIORITY);
-```
-
-### Real-time Monitoring
-```typescript
-const queueManager = cleo.getQueueManager();
-
-queueManager.onTaskEvent(ObserverEvent.STATUS_CHANGE, (taskId, status, data) => {
-  console.log(`Task ${taskId} status: ${status}`);
-});
-
-queueManager.onTaskEvent(ObserverEvent.GROUP_CHANGE, (taskId, status, data) => {
-  console.log(`Group operation: ${data.operation}`);
+queueManager.onTaskEvent(ObserverEvent.TASK_COMPLETED, 
+  (taskId, status, data) => {
+    console.log(`Task ${taskId} completed with result:`, data.result);
 });
 ```
 
-## 🚀 Getting Started
+## 📈 Performance Improvements
 
-```typescript
-import { Cleo } from "@cleotasks/core";
+- **Optimized Redis Operations**: Reduced Redis operations per task
+- **Smart Caching**: Improved caching of task and group metadata
+- **Efficient Event Handling**: Filtered event propagation
+- **Memory Management**: Better memory usage in long-running workers
 
-const cleo = Cleo.getInstance();
-cleo.configure({
-  redis: {
-    host: "localhost",
-    port: 6379,
-    password: "cleosecret",
-  },
-  worker: {
-    concurrency: 4,
-    queues: [
-      {
-        name: "default",
-        priority: TaskPriority.NORMAL,
-      },
-    ],
-  },
-});
-```
+## 🔄 Migration Guide
+
+Upgrading from Cleo 1.x is straightforward:
+
+1. Update dependencies to 2.0.0
+2. Replace deprecated retry options with new backoff configuration
+3. Update event handlers to use taskId filtering
+4. Review and update group processing strategies
 
 ## 🎯 What's Next?
 
-We're actively developing Cleo with exciting features planned:
+We're already working on exciting features for future releases:
+
 - GraphQL API for task management
 - Kubernetes integration
 - Machine learning powered scheduling
 - Enhanced dashboard features
+- Additional processing strategies
 
-Join us in building the future of task processing! 
+## 🙏 Thank You
+
+A huge thank you to our community for your feedback and contributions. Cleo 2.0 is a significant step forward in distributed task processing, and we're excited to see what you'll build with it.
+
+Ready to get started? Check out our updated documentation:
+- [Quick Start Guide](../docs/quick-start)
+- [Core Concepts](../docs/core-concepts)
+- [Best Practices](../docs/best-practices)
+- [API Reference](../docs/api-reference) 

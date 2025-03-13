@@ -8,17 +8,21 @@ excerpt: "Learn how to effectively use Cleo's task grouping capabilities to orga
 
 # Effective Task Grouping Strategies with Cleo 📊
 
-Task grouping is a powerful feature that helps organize and process related tasks efficiently. Let's explore how to use Cleo's grouping capabilities effectively.
+Task grouping is a powerful feature that helps organize and process related tasks efficiently. Let's explore how to use Cleo's advanced grouping capabilities effectively.
 
 ## Understanding Group Processing Strategies
 
-### Round Robin Strategy
+### Round Robin Strategy with Weights
 ```typescript
 @QueueClass({
   defaultOptions: {
     group: "notifications",
     maxRetries: 3,
-    retryDelay: 1000,
+    backoff: {
+      type: BackoffType.EXPONENTIAL,
+      delay: 1000,
+    },
+    weight: 5, // Default weight for all tasks
   },
   queue: "notifications",
 })
@@ -26,6 +30,7 @@ class NotificationService {
   @task({
     id: "send-push",
     priority: TaskPriority.HIGH,
+    weight: 8, // Higher weight for push notifications
   })
   async sendPushNotification(data: { message: string }) {
     // Push notification logic
@@ -34,54 +39,82 @@ class NotificationService {
   @task({
     id: "send-email",
     priority: TaskPriority.NORMAL,
+    weight: 3, // Lower weight for emails
   })
   async sendEmail(data: { message: string }) {
     // Email sending logic
   }
 }
 
-// Configure Round Robin strategy for fair distribution
-queueManager.setGroupProcessingStrategy(GroupProcessingStrategy.ROUND_ROBIN);
+// Configure Round Robin strategy with weights
+const groupConfig: GroupConfig = {
+  strategy: GroupProcessingStrategy.ROUND_ROBIN,
+  concurrency: 5,
+  maxConcurrency: 10,
+  rateLimit: {
+    max: 1000,
+    duration: 60000,
+  },
+};
+
+await queueManager.setGroupConfig("notifications", groupConfig);
 ```
 
-Round Robin is ideal when you want to:
-- Ensure fair task distribution across groups
-- Prevent any single group from monopolizing resources
-- Balance load across different notification types
-
-### FIFO Processing
+### FIFO Processing with Backoff
 ```typescript
 @QueueClass({
   defaultOptions: {
     group: "orders",
     maxRetries: 3,
+    backoff: {
+      type: BackoffType.EXPONENTIAL,
+      delay: 1000,
+    },
+    removeOnComplete: {
+      age: 3600, // Remove completed orders after 1 hour
+      count: 1000, // Keep last 1000 completed orders
+    },
   },
   queue: "orders",
 })
 class OrderProcessor {
   @task({
     id: "process-order",
+    timeout: 30000,
   })
   async processOrder(orderId: string) {
-    // Order processing logic
+    try {
+      // Order processing logic
+    } catch (error) {
+      // Error will trigger backoff retry
+      throw error;
+    }
   }
 }
 
-// Ensure ordered processing within groups
-queueManager.setGroupProcessingStrategy(GroupProcessingStrategy.FIFO);
+// Configure FIFO processing with monitoring
+const fifoConfig: GroupConfig = {
+  strategy: GroupProcessingStrategy.FIFO,
+  concurrency: 3,
+  rateLimit: {
+    max: 100,
+    duration: 60000,
+  },
+};
+
+await queueManager.setGroupConfig("orders", fifoConfig);
 ```
 
-FIFO is perfect for:
-- Maintaining strict order of operations
-- Processing time-sensitive sequences
-- Handling dependent tasks
-
-### Priority-based Processing
+### Priority-based Processing with Dynamic Weights
 ```typescript
 @QueueClass({
   defaultOptions: {
     group: "users",
     maxRetries: 3,
+    backoff: {
+      type: BackoffType.EXPONENTIAL,
+      delay: 1000,
+    },
   },
   queue: "users",
 })
@@ -89,135 +122,312 @@ class UserService {
   @task({
     id: "process-vip",
     priority: TaskPriority.HIGH,
+    weight: 10,
   })
   async processVIPUser(userId: string) {
     // VIP user processing
   }
+
+  @task({
+    id: "process-standard",
+    priority: TaskPriority.NORMAL,
+    weight: 5,
+  })
+  async processStandardUser(userId: string) {
+    // Standard user processing
+  }
 }
 
-// Set up priority processing
-queueManager.setGroupProcessingStrategy(GroupProcessingStrategy.PRIORITY);
-await queueManager.setGroupPriority("vip-users", 10);
-await queueManager.setGroupPriority("regular-users", 5);
+// Dynamic priority and weight adjustment
+class GroupPriorityManager {
+  async adjustGroupSettings(groupId: string) {
+    const stats = await queueManager.getGroupStats(groupId);
+    const load = await this.getSystemLoad();
+    
+    await queueManager.setGroupConfig(groupId, {
+      priority: this.calculatePriority(stats, load),
+      weight: this.calculateWeight(stats, load),
+      concurrency: this.calculateConcurrency(stats, load),
+    });
+  }
+}
 ```
 
-Priority-based processing is essential for:
-- Handling VIP customers
-- Critical system operations
-- Resource allocation based on importance
+## Enhanced Group Monitoring
 
-## Monitoring Group Performance
-
+### Comprehensive Metrics Tracking
 ```typescript
-// Track group statistics
-const queueManager = cleo.getQueueManager();
-
-async function monitorGroupPerformance() {
-  const group = await queueManager.getGroup("notifications");
-  const stats = await group.getStats();
-  
-  console.log("Group Performance:", {
-    completed: stats.completed,
-    failed: stats.failed,
-    avgProcessingTime: stats.avgProcessingTime,
-  });
+class GroupMetricsCollector {
+  async collectGroupMetrics(groupId: string) {
+    const group = await queueManager.getGroup(groupId);
+    const stats = await group.getStats();
+    const history = await group.getHistory();
+    
+    return {
+      current: {
+        total: stats.total,
+        active: stats.active,
+        completed: stats.completed,
+        failed: stats.failed,
+        delayed: stats.delayed,
+        waiting: stats.waiting,
+      },
+      performance: {
+        avgProcessingTime: stats.avgProcessingTime,
+        throughput: stats.completed / stats.uptime,
+        successRate: stats.completed / (stats.completed + stats.failed),
+        concurrencyUtilization: stats.active / stats.maxConcurrency,
+      },
+      history: history.map(entry => ({
+        timestamp: entry.timestamp,
+        metrics: {
+          completed: entry.completed,
+          failed: entry.failed,
+          processing: entry.processing,
+        },
+      })),
+    };
+  }
 }
+```
 
-// Monitor group events
-queueManager.onTaskEvent(ObserverEvent.GROUP_CHANGE, (taskId, status, data) => {
-  console.log(`Group operation: ${data.operation}`);
-});
+### Advanced Event Handling
+```typescript
+class GroupEventHandler {
+  constructor() {
+    // Monitor group state changes
+    queueManager.onTaskEvent(ObserverEvent.GROUP_STATE_CHANGE,
+      (groupId, status, data) => {
+        this.handleStateChange(groupId, status, data);
+    });
+
+    // Track group operations
+    queueManager.onTaskEvent(ObserverEvent.GROUP_CHANGE,
+      (groupId, status, data) => {
+        this.handleGroupOperation(groupId, status, data);
+    });
+
+    // Monitor group performance
+    queueManager.onTaskEvent(ObserverEvent.GROUP_METRICS,
+      (groupId, metrics) => {
+        this.updateMetrics(groupId, metrics);
+    });
+  }
+
+  private async handleStateChange(groupId: string, status: string, data: any) {
+    await this.notifyStateChange(groupId, status);
+    await this.updateDashboard(groupId);
+    await this.checkAlerts(groupId, status, data);
+  }
+}
 ```
 
 ## Best Practices
 
 ### 1. Group Organization
-- Group related tasks together
-- Use meaningful group names
-- Keep group sizes manageable
+```typescript
+class TaskGroupManager {
+  async organizeGroups() {
+    // Configure groups with appropriate settings
+    await this.setupGroup("critical", {
+      strategy: GroupProcessingStrategy.PRIORITY,
+      concurrency: 10,
+      maxConcurrency: 20,
+      priority: 1,
+    });
 
-### 2. Error Handling
+    await this.setupGroup("background", {
+      strategy: GroupProcessingStrategy.ROUND_ROBIN,
+      concurrency: 5,
+      maxConcurrency: 10,
+      priority: 5,
+    });
+  }
+
+  private async setupGroup(name: string, config: GroupConfig) {
+    await queueManager.setGroupConfig(name, {
+      ...config,
+      rateLimit: this.calculateRateLimit(name),
+      backoff: this.getBackoffStrategy(name),
+    });
+  }
+}
+```
+
+### 2. Error Handling with Recovery
 ```typescript
 @QueueClass({
   defaultOptions: {
     group: "critical",
     maxRetries: 3,
-    retryDelay: 1000,
+    backoff: {
+      type: BackoffType.EXPONENTIAL,
+      delay: 1000,
+    },
+    removeOnComplete: true,
   },
 })
 class ReliableService {
   @task({
     id: "critical-operation",
+    timeout: 30000,
   })
   async processCriticalTask(data: any) {
     try {
-      // Task logic
+      await this.process(data);
     } catch (error) {
-      // Group-specific error handling
-      throw error;
+      // Enhanced error handling
+      await this.handleError(error);
+      await this.notifyFailure(error);
+      
+      // Determine if retry is appropriate
+      if (this.shouldRetry(error)) {
+        throw error; // Trigger backoff retry
+      } else {
+        await this.handleFatalError(error);
+      }
     }
   }
 }
 ```
 
 ### 3. Resource Management
-- Monitor group sizes
-- Set appropriate concurrency limits
-- Use priority strategically
-
-## Common Patterns
-
-### Batch Processing
 ```typescript
-@QueueClass({
-  defaultOptions: {
-    group: "batch-jobs",
-  },
-})
-class BatchProcessor {
-  @task({
-    id: "process-batch",
-  })
-  async processBatch(items: any[]) {
-    for (const item of items) {
-      // Process each item
+class GroupResourceManager {
+  async optimizeResources() {
+    const groups = await queueManager.getAllGroups();
+    
+    for (const group of groups) {
+      const stats = await group.getStats();
+      const metrics = await this.getGroupMetrics(group.name);
+      
+      await this.adjustResources(group.name, {
+        concurrency: this.calculateOptimalConcurrency(stats, metrics),
+        weight: this.calculateOptimalWeight(stats, metrics),
+        priority: this.calculateOptimalPriority(stats, metrics),
+      });
     }
   }
 }
 ```
 
-### Sequential Processing
+## Advanced Patterns
+
+### Batch Processing with Progress Tracking
+```typescript
+@QueueClass({
+  defaultOptions: {
+    group: "batch-jobs",
+    weight: 8,
+  },
+})
+class BatchProcessor {
+  @task({
+    id: "process-batch",
+    backoff: {
+      type: BackoffType.EXPONENTIAL,
+      delay: 1000,
+    },
+  })
+  async processBatch(items: any[]) {
+    const progress = new ProgressTracker(items.length);
+    const chunks = this.chunkArray(items, 100);
+    
+    for (const chunk of chunks) {
+      await Promise.all(chunk.map(async item => {
+        try {
+          await this.processItem(item);
+          progress.increment();
+          await this.updateProgress(progress);
+        } catch (error) {
+          progress.recordError(error);
+          throw error;
+        }
+      }));
+    }
+    
+    return progress.getResults();
+  }
+}
+```
+
+### Sequential Processing with Dependencies
 ```typescript
 @QueueClass({
   defaultOptions: {
     group: "sequential",
+    maxRetries: 3,
   },
 })
 class SequentialProcessor {
   @task({
     id: "step-1",
+    weight: 5,
   })
   async stepOne() {
-    // First step
+    // First step implementation
+    await this.notifyStepCompletion("step-1");
   }
 
   @task({
     id: "step-2",
+    weight: 5,
+    dependencies: ["step-1"],
   })
   async stepTwo() {
-    // Second step
+    // Second step implementation
+    await this.notifyStepCompletion("step-2");
+  }
+
+  @task({
+    id: "step-3",
+    weight: 5,
+    dependencies: ["step-2"],
+  })
+  async stepThree() {
+    // Final step implementation
+    await this.notifyProcessComplete();
   }
 }
 ```
 
-## Conclusion
+## Best Practices Summary
 
-Effective task grouping is key to building scalable and maintainable task processing systems. By choosing the right processing strategy and following best practices, you can ensure efficient task execution while maintaining system reliability.
+1. **Group Configuration**
+   - Choose appropriate processing strategies
+   - Configure concurrency and rate limits
+   - Implement backoff strategies
+   - Set up proper monitoring
+
+2. **Resource Management**
+   - Use weights for resource allocation
+   - Monitor group performance
+   - Adjust resources dynamically
+   - Implement proper cleanup
+
+3. **Error Handling**
+   - Configure appropriate retry strategies
+   - Implement comprehensive error tracking
+   - Set up alerting for critical failures
+   - Maintain error history
+
+4. **Monitoring**
+   - Track group metrics
+   - Monitor resource usage
+   - Set up performance alerts
+   - Maintain historical data
+
+5. **Optimization**
+   - Regular performance review
+   - Dynamic resource adjustment
+   - Cleanup of completed tasks
+   - Regular maintenance
 
 Remember to:
-- Choose appropriate processing strategies
+- Choose appropriate group strategies
 - Monitor group performance
 - Handle errors gracefully
 - Manage resources effectively
+- Maintain proper documentation
 
 Happy task processing! 🚀

@@ -16,22 +16,25 @@ Cleo is built on top of BullMQ and Redis, providing a robust foundation for scal
 
 ```typescript
 import { Cleo } from "@cleotasks/core";
-import { TaskPriority } from "@cleotasks/core/types/enums";
+import { TaskPriority, BackoffType } from "@cleotasks/core/types/enums";
 
-// Basic configuration
+// Enhanced configuration with latest features
 const cleo = Cleo.getInstance();
 cleo.configure({
   redis: {
     host: "localhost",
     port: 6379,
     password: "cleosecret",
+    keyPrefix: "prod:", // Multi-tenant support
   },
   worker: {
     concurrency: 4,
+    maxMemoryPercent: 80,
     queues: [
       {
         name: "high-priority",
         priority: TaskPriority.HIGH,
+        concurrency: 2,
       },
     ],
   },
@@ -40,41 +43,65 @@ cleo.configure({
 
 ## Vertical Scaling Strategies
 
-### 1. Increasing Concurrency
+### 1. Smart Concurrency Management
 
 ```typescript
-// Scale up worker concurrency
+// Advanced worker configuration
 cleo.configure({
   worker: {
-    concurrency: 50, // Increase based on CPU cores
+    concurrency: Math.max(1, os.cpus().length - 1), // Dynamic based on CPU
+    maxMemoryPercent: 80,
+    memoryCheckInterval: 1000,
     queues: [
       {
-        name: "intensive-jobs",
-        concurrency: 25, // Queue-specific concurrency
+        name: "cpu-intensive",
+        concurrency: 2,
+        weight: 10, // Higher weight = more resources
+      },
+      {
+        name: "io-bound",
+        concurrency: 10,
+        weight: 5,
       },
     ],
   },
 });
 ```
 
-### 2. Memory Management
+### 2. Intelligent Resource Management
 
 ```typescript
-// Configure memory limits
-cleo.configure({
-  worker: {
-    maxMemoryPercent: 80, // Stop accepting jobs at 80% memory usage
-    memoryCheckInterval: 1000, // Check every second
+// Advanced resource management
+@QueueClass({
+  defaultOptions: {
+    backoff: {
+      type: BackoffType.EXPONENTIAL,
+      delay: 1000,
+    },
+    removeOnComplete: {
+      age: 3600, // Remove completed jobs after 1 hour
+      count: 1000, // Keep last 1000 completed jobs
+    },
+    weight: 5, // Resource allocation weight
   },
-});
+})
+class ResourceOptimizedService {
+  @task({
+    id: "resource-intensive-task",
+    timeout: 30000,
+  })
+  async process() {
+    // Resource-intensive processing
+  }
+}
 ```
 
 ## Horizontal Scaling
 
-### 1. Redis Cluster Setup
+### 1. Enhanced Redis Cluster
 
 ```typescript
-// Configure Redis Cluster
+// Advanced Redis Cluster configuration
 cleo.configure({
   redis: {
     cluster: [
@@ -84,43 +111,60 @@ cleo.configure({
     ],
     maxRetriesPerRequest: 3,
     retryStrategy: (times: number) => Math.min(times * 50, 2000),
+    enableReadyCheck: true,
+    keyPrefix: "tenant1:", // Multi-tenant support
   },
 });
 ```
 
-### 2. Multiple Workers
+### 2. Distributed Workers
 
 ```typescript
-// Distribute workers across instances
-const workerConfig = {
-  name: "worker-1",
-  queues: [
-    { name: "emails", priority: TaskPriority.HIGH },
-    { name: "notifications", priority: TaskPriority.NORMAL },
-  ],
-  concurrency: 10,
-};
+// Advanced worker distribution
+class WorkerManager {
+  async startWorker(config: WorkerConfig) {
+    const worker = await cleo.createWorker({
+      name: config.name,
+      queues: config.queues,
+      concurrency: config.concurrency,
+      backoff: {
+        type: BackoffType.EXPONENTIAL,
+        delay: 1000,
+      },
+      removeOnComplete: true,
+    });
 
-// Start multiple workers
-startWorker(workerConfig);
+    // Enhanced worker monitoring
+    worker.on('completed', (job) => this.trackMetrics(job));
+    worker.on('failed', (job, err) => this.handleFailure(job, err));
+    
+    return worker;
+  }
+}
 ```
 
 ## Queue Optimization
 
-### 1. Rate Limiting
+### 1. Advanced Rate Limiting
 
 ```typescript
 @QueueClass({
   defaultOptions: {
     rateLimiter: {
-      max: 1000, // Maximum jobs per time window
-      duration: 1000, // Time window in milliseconds
+      max: 1000,
+      duration: 60000,
+      groupKey: "ip", // Rate limit by group key
+    },
+    backoff: {
+      type: BackoffType.EXPONENTIAL,
+      delay: 1000,
     },
   },
 })
-class RateLimitedService {
+class EnhancedRateLimitedService {
   @task({
     id: "rate-limited-task",
+    weight: 5,
   })
   async process() {
     // Rate-limited processing
@@ -128,53 +172,79 @@ class RateLimitedService {
 }
 ```
 
-### 2. Job Prioritization
+### 2. Priority and Weight Management
 
 ```typescript
 @QueueClass({
   defaultOptions: {
-    priority: 1, // Lower number = higher priority
+    priority: TaskPriority.HIGH,
+    weight: 10,
+    removeOnComplete: true,
   },
 })
-class PriorityService {
+class WeightedPriorityService {
   @task({
-    id: "high-priority-task",
-    priority: TaskPriority.HIGH,
+    id: "critical-task",
+    timeout: 30000,
+    backoff: {
+      type: BackoffType.EXPONENTIAL,
+      delay: 1000,
+    },
   })
   async processUrgent() {
-    // Urgent task processing
+    // Critical task processing
   }
 }
 ```
 
 ## Performance Optimization
 
-### 1. Batch Processing
+### 1. Smart Batch Processing
 
 ```typescript
 @QueueClass({
   defaultOptions: {
     group: "batch-jobs",
+    weight: 8,
   },
 })
-class BatchProcessor {
+class SmartBatchProcessor {
   @task({
     id: "process-batch",
+    backoff: {
+      type: BackoffType.EXPONENTIAL,
+      delay: 1000,
+    },
   })
   async processBatch(items: any[]) {
-    // Process items in chunks
     const chunks = this.chunkArray(items, 100);
+    const results = [];
+    
     for (const chunk of chunks) {
-      await Promise.all(chunk.map(item => this.processItem(item)));
+      const chunkResults = await Promise.all(
+        chunk.map(item => this.processWithRetry(item))
+      );
+      results.push(...chunkResults);
+    }
+    
+    return results;
+  }
+
+  private async processWithRetry(item: any) {
+    try {
+      return await this.processItem(item);
+    } catch (error) {
+      // Intelligent error handling with backoff
+      throw error;
     }
   }
 }
 ```
 
-### 2. Connection Pool Management
+### 2. Enhanced Connection Management
 
 ```typescript
-// Configure connection pool
+// Advanced connection pool configuration
 cleo.configure({
   redis: {
     enableReadyCheck: true,
@@ -182,119 +252,113 @@ cleo.configure({
     connectionNamespace: "cleo",
     connectTimeout: 5000,
     disconnectTimeout: 5000,
+    retryStrategy: (times: number) => {
+      if (times > 10) return null; // Stop retrying after 10 attempts
+      return Math.min(times * 100, 3000); // Progressive delay
+    },
   },
 });
 ```
 
-## Monitoring at Scale
+## Comprehensive Monitoring
 
-### 1. Metrics Collection
+### 1. Enhanced Metrics Collection
 
 ```typescript
-const queueManager = cleo.getQueueManager();
+class MetricsCollector {
+  async collectMetrics() {
+    const queues = await queueManager.getQueues();
+    const metrics = await Promise.all(
+      queues.map(async queue => {
+        const queueMetrics = await queue.getMetrics();
+        const workerMetrics = await this.getWorkerMetrics(queue.name);
+        
+        return {
+          queue: queue.name,
+          metrics: {
+            processed: queueMetrics.processed,
+            failed: queueMetrics.failed,
+            delayed: queueMetrics.delayed,
+            active: queueMetrics.active,
+            waitTime: queueMetrics.waitTime,
+            processingTime: queueMetrics.processingTime,
+          },
+          workers: workerMetrics,
+        };
+      })
+    );
 
-// Monitor queue metrics
-async function collectMetrics() {
-  const queues = await queueManager.getQueues();
-  for (const queue of queues) {
-    const metrics = await queue.getMetrics();
-    console.log(`Queue ${queue.name} metrics:`, {
-      processed: metrics.processed,
-      failed: metrics.failed,
-      delayed: metrics.delayed,
-      active: metrics.active,
-    });
+    return this.aggregateMetrics(metrics);
   }
 }
 ```
 
-### 2. Health Checks
+### 2. Advanced Health Monitoring
 
 ```typescript
-async function checkSystemHealth() {
-  const health = await cleo.getHealth();
-  const redisInfo = await health.getRedisInfo();
-  
-  console.log("System Health:", {
-    redis: {
-      connectedClients: redisInfo.connected_clients,
-      usedMemory: redisInfo.used_memory_human,
-      commandsProcessed: redisInfo.total_commands_processed,
-    },
-    queues: health.queues,
-    workers: health.workers,
-  });
+class HealthMonitor {
+  async checkSystemHealth() {
+    const health = await cleo.getHealth();
+    const redisInfo = await health.getRedisInfo();
+    const workerStats = await this.getWorkerStats();
+    
+    return {
+      redis: {
+        connectedClients: redisInfo.connected_clients,
+        usedMemory: redisInfo.used_memory_human,
+        commandsProcessed: redisInfo.total_commands_processed,
+        keyspace: redisInfo.keyspace_hits,
+      },
+      queues: await this.getQueueHealth(),
+      workers: workerStats,
+      system: {
+        memory: process.memoryUsage(),
+        cpu: process.cpuUsage(),
+        uptime: process.uptime(),
+      },
+    };
+  }
 }
 ```
 
 ## Best Practices for Scaling
 
 1. **Redis Configuration**
-   - Enable persistence
-   - Configure proper maxmemory policy
+   - Enable persistence with appropriate fsync settings
+   - Configure maxmemory-policy based on workload
    - Use Redis Cluster for high availability
+   - Implement key prefixing for multi-tenant setups
 
 2. **Worker Management**
-   - Scale workers based on CPU cores
-   - Monitor worker health
-   - Implement graceful shutdown
+   - Scale workers dynamically based on system metrics
+   - Implement graceful shutdown with task completion
+   - Use worker weights for resource allocation
+   - Configure appropriate backoff strategies
 
 3. **Queue Design**
-   - Use appropriate priorities
-   - Implement rate limiting
-   - Design efficient batch processing
+   - Implement priority and weight-based processing
+   - Use rate limiting with group keys
+   - Design efficient batch processing with retries
+   - Configure automatic job cleanup
 
-4. **Monitoring**
-   - Track key metrics
-   - Set up alerts
-   - Monitor Redis health
+4. **Monitoring and Maintenance**
+   - Track comprehensive metrics
+   - Implement proactive health checks
+   - Set up alerts for critical thresholds
+   - Monitor Redis cluster health
+   - Track worker performance metrics
 
-## Common Pitfalls to Avoid
-
-1. **Memory Management**
-```typescript
-// ❌ Bad: No memory limits
-cleo.configure({
-  worker: {
-    concurrency: 100,
-  },
-});
-
-// ✅ Good: Proper memory management
-cleo.configure({
-  worker: {
-    concurrency: 100,
-    maxMemoryPercent: 80,
-    memoryCheckInterval: 1000,
-  },
-});
-```
-
-2. **Connection Handling**
-```typescript
-// ❌ Bad: No connection management
-const redis = new Redis();
-
-// ✅ Good: Proper connection handling
-const redis = new Redis({
-  maxRetriesPerRequest: 3,
-  enableReadyCheck: true,
-  retryStrategy: (times) => Math.min(times * 50, 2000),
-});
-```
-
-## Conclusion
-
-Scaling Cleo effectively requires:
-- Understanding Redis and BullMQ capabilities
-- Proper configuration of workers and queues
-- Efficient resource management
-- Comprehensive monitoring
+5. **Security and Multi-tenancy**
+   - Use key prefixing for tenant isolation
+   - Implement rate limiting per tenant
+   - Configure secure Redis connections
+   - Monitor tenant resource usage
 
 Remember to:
-- Scale gradually
-- Monitor performance
-- Optimize resource usage
-- Plan for failures
+- Scale gradually based on metrics
+- Monitor system performance
+- Implement proper error handling
+- Plan for disaster recovery
+- Regular maintenance and optimization
 
 Happy scaling! 🚀
