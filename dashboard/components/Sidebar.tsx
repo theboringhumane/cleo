@@ -5,11 +5,9 @@ import { Icons } from "@/components/icons";
 import React from 'react';
 
 const navigation = [
-  { name: 'Dashboard', href: '/', icon: Icons.logo },
-  { name: 'Tasks', href: '/tasks', icon: Icons.tasks },
+  { name: 'Queues', href: '/queues', icon: Icons.logo },
+  { name: 'Groups', href: '/groups', icon: Icons.tasks },
   { name: 'Workers', href: '/workers', icon: Icons.monitor },
-  { name: 'Metrics', href: '/metrics', icon: Icons.chart },
-  { name: 'Settings', href: '/settings', icon: Icons.settings },
 ];
 
 export function Sidebar() {
@@ -21,7 +19,7 @@ export function Sidebar() {
         <div className="flex items-center flex-shrink-0 px-4">
           <img
             className="w-auto h-8"
-            src="/logo.svg"
+            src="https://github.com/theboringhumane/cleo/raw/master/docs/apps/web/public/logo.svg"
             alt="Cleo"
           />
           <span className="ml-2 text-xl font-semibold">Cleo</span>

@@ -1,14 +1,14 @@
-import type { Metadata } from 'next';
-import { Inter } from 'next/font/google';
-import './globals.css';
-import { cn } from "@/lib/utils";
-import { ThemeProvider } from "@/components/theme-provider";
+import type { Metadata } from "next";
+import { Inter } from "next/font/google";
+import "./globals.css";
+import { Toaster } from "sonner";
+import { DashboardLayout } from "@/components/layouts/DashboardLayout";
 
-const inter = Inter({ subsets: ['latin'] });
+const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: 'Cleo - Distributed Task Queue',
-  description: 'Modern task queue system for distributed applications',
+  title: "Cleo Dashboard",
+  description: "Task Queue Management Dashboard",
 };
 
 export default function RootLayout({
@@ -17,21 +17,12 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en" suppressHydrationWarning className="dark">
-      <body className={cn(
-        "min-h-screen bg-black font-sans antialiased",
-        inter.className
-      )}>
-        <ThemeProvider
-          attribute="class"
-          defaultTheme="dark"
-          enableSystem={false}
-          storageKey="cleo-theme"
-        >
-          <div className="relative flex min-h-screen flex-col">
-            <div className="flex-1">{children}</div>
-          </div>
-        </ThemeProvider>
+    <html lang="en" className="h-full bg-gray-100">
+      <body className={`h-full ${inter.className}`}>
+        <DashboardLayout>
+          {children}
+          <Toaster richColors position="top-right" />
+        </DashboardLayout>
       </body>
     </html>
   );

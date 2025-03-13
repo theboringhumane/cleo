@@ -4,10 +4,12 @@ import React from 'react';
 import { useTasks } from "@/hooks/useTasks"
 import { Button } from "@/components/ui/button"
 import { Icons } from "@/components/icons"
-import { Task } from "@cleo/core/src/types/interfaces"
-
+import { Task } from '@/types/api';
 // Extend the Task type to include metadata
-interface TaskWithMetadata extends Task<any> {
+interface TaskWithMetadata extends Task {
+  id: string;
+  name: string;
+  data: any;
   metadata?: {
     description?: string;
     progress?: number;
@@ -59,9 +61,9 @@ export function TaskList() {
             </div>
             <div className="flex items-center space-x-2">
               <StatusBadge status={task.state} />
-              {task.retryCount > 0 && (
+              {task.metadata?.attempts && task.metadata.attempts > 0 && (
                 <span className="text-xs text-yellow-500">
-                  Retries: {task.retryCount}
+                  Retries: {task.metadata.attempts}
                 </span>
               )}
               <Button variant="ghost" size="sm" className="h-8 w-8">
