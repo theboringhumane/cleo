@@ -117,6 +117,56 @@ graph TB
     style Deliver fill:#fbf,stroke:#333
 ```
 
+```mermaid
+graph TD
+    %% API Entry Point
+    A[API: POST /api/groups/:groupName/tasks] --> B[QueueManager.addTaskToGroup]
+    
+    %% Task Addition Flow
+    B --> C[TaskGroup.addTask]
+    C --> D{Store in Redis}
+    D --> |Add to group set| E[groupKey]
+    D --> |Set priority score| F[processingOrderKey]
+    D --> |Set initial status| G[stateKey: WAITING]
+    D --> |Store task details| H[groupKey:tasks:taskId]
+
+    %% Processing Flow
+    I[QueueManager.processGroupTasks] --> J[TaskGroup.processNextTask]
+    J --> K[TaskGroup.getNextTask]
+    K --> |Strategy based selection| L{Select by Strategy}
+    L --> |FIFO| M[zrange 0,0]
+    L --> |LIFO| N[zrange -1,-1]
+    L --> |Priority| O[zrevrange 0,0]
+    
+    %% Task Processing
+    J --> P[Update task status: ACTIVE]
+    P --> Q[QueueManager.ensureTaskInQueue]
+    Q --> R[Queue.add]
+    
+    %% Worker Processing
+    S[Worker.JobProcessor] --> T{Check Group Task}
+    T --> |Yes| U[TaskGroup.getNextTask]
+    U --> V{Can Process?}
+    V --> |Yes| W[Process Task]
+    V --> |No| X[Move to Delayed]
+    
+    %% Task Completion
+    W --> Y[TaskGroup.completeTask]
+    Y --> Z[Update Stats]
+    Y --> AA[Clean up task data]
+    
+    %% Error Handling
+    W --> |Error| BB[TaskGroup.failTask]
+    BB --> CC{Retry?}
+    CC --> |Yes| DD[Add back to processing order]
+    CC --> |No| EE[Move to Dead Letter Queue]
+
+    %% Health Check
+    FF[QueueManager.startHealthCheck] --> GG[TaskGroup.recoverStuckTasks]
+    GG --> HH[Check processing duration]
+    HH --> |Exceeded timeout| BB
+```
+
 ## Installation 🛠️
 
 ```bash

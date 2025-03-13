@@ -1,8 +1,10 @@
 import { TaskOptions } from "../types/interfaces";
 import { logger } from "../utils/logger";
-import { ObserverEvent, TaskState } from "../types/enums";
+import { ObserverEvent, TaskState, TaskStatus } from "../types/enums";
 import { redisConnection, type Cleo } from "../index";
 import { generateUUID } from "../utils";
+import { WorkerType } from "../queue/queueManager";
+import { retryWithBackoff } from "../utils/retryWithBackoff";
 
 let cleoInstance: Cleo | null = null;
 
@@ -26,34 +28,32 @@ export function task(options: TaskOptions = {}): MethodDecorator {
     const queueName = options.queue || "default";
     const queueManager = cleoInstance.getQueueManager();
 
+    // Get or create queue
     let queue = queueManager.getQueue(queueName);
-
     if (!queue) {
-      logger.warn("🔥 Task Decorator: No queue found for", {
+      logger.warn("🔥 Task Decorator: Creating new queue", {
         file: "task.ts",
-        line: 26,
         function: methodName,
         queueName,
       });
 
-      queueManager.initializeQueue(queueName, {
+      queue = queueManager.createQueue(queueName, {
         connection: redisConnection.getInstance("default"),
       });
     }
 
-    // Register the task at decoration time
+    // Get or initialize worker
     const worker = queueManager.getWorker(queueName);
     if (!worker) {
       throw new Error(`No worker found for queue ${queueName}`);
     }
 
-    // Ensure the method is bound to its instance with proper typing
+    // Register task handler
     worker.registerTask(
       methodName,
-      function (this: typeof target, ...args: any[]) {
+      async function (this: typeof target, ...args: any[]) {
         logger.debug("🎯 Task Decorator: Executing task", {
           file: "task.ts",
-          line: 75,
           function: methodName,
           args,
         });
@@ -63,19 +63,20 @@ export function task(options: TaskOptions = {}): MethodDecorator {
 
     logger.info("🎯 Task Decorator: Task registered", {
       file: "task.ts",
-      line: 46,
       function: methodName,
       taskState: TaskState.WAITING,
       group: options.group,
     });
 
-    // Replace the original method with proper typing
+    // Replace original method
     descriptor.value = async function (
       this: typeof target,
       ...args: any[]
     ): Promise<any> {
       const startTime = Date.now();
       let taskId: string | undefined;
+      let timeoutId: NodeJS.Timeout | undefined;
+      let isSettled = false;
 
       try {
         const taskOptions = {
@@ -83,6 +84,7 @@ export function task(options: TaskOptions = {}): MethodDecorator {
           id: `${methodName}-${generateUUID()}`,
           timeout: options.timeout || 30000,
           maxRetries: options.maxRetries || 3,
+          retryDelay: options.retryDelay || 3000,
         };
 
         taskId = taskOptions.id;
@@ -97,43 +99,83 @@ export function task(options: TaskOptions = {}): MethodDecorator {
         );
 
         if (taskOptions.group) {
-          await queueManager.addTaskToGroup(methodName, taskOptions, args);
+          const group = await queueManager.getGroup(taskOptions.group);
+          await group.addTask(methodName, taskOptions, {
+            args,
+            context: this,
+          });
 
-          // Use event-based approach instead of polling
           return new Promise((resolve, reject) => {
-            const timeoutId = setTimeout(() => {
-              queueManager.offTaskEvent(ObserverEvent.TASK_COMPLETED);
-              queueManager.offTaskEvent(ObserverEvent.TASK_FAILED);
-              reject(new Error("Task processing timeout"));
+            timeoutId = setTimeout(() => {
+              if (!isSettled) {
+                isSettled = true;
+                cleanup();
+                reject(new Error("Task processing timeout"));
+              }
             }, taskOptions.timeout);
 
+            const cleanup = () => {
+              if (taskId) {
+                queueManager.offTaskEvent(ObserverEvent.TASK_COMPLETED);
+                queueManager.offTaskEvent(ObserverEvent.TASK_FAILED);
+              }
+              clearTimeout(timeoutId);
+            };
+
+            // Let TaskGroup handle the completion
             queueManager.onTaskEvent(
               ObserverEvent.TASK_COMPLETED,
-              (completedTaskId, status, result) => {
-                if (completedTaskId === taskId) {
-                  clearTimeout(timeoutId);
-                  queueManager.offTaskEvent(ObserverEvent.TASK_COMPLETED);
-                  queueManager.offTaskEvent(ObserverEvent.TASK_FAILED);
-                  resolve(result);
+              (completedTaskId: string, status: TaskStatus, data: any) => {
+                if (!isSettled && completedTaskId === taskId) {
+                  isSettled = true;
+                  cleanup();
+                  resolve(data?.result);
                 }
               }
             );
 
+            // Let TaskGroup handle the failure
             queueManager.onTaskEvent(
               ObserverEvent.TASK_FAILED,
-              (failedTaskId, status, error) => {
-                if (failedTaskId === taskId) {
-                  clearTimeout(timeoutId);
-                  queueManager.offTaskEvent(ObserverEvent.TASK_COMPLETED);
-                  queueManager.offTaskEvent(ObserverEvent.TASK_FAILED);
-                  reject(error);
+              (failedTaskId: string, status: TaskStatus, data: any) => {
+                if (!isSettled && failedTaskId === taskId) {
+                  isSettled = true;
+                  cleanup();
+                  reject(data?.error || new Error("Task failed"));
                 }
               }
             );
+
+            // Handle cancellation through TaskGroup
+            if (
+              typeof AbortSignal !== "undefined" &&
+              args[0] instanceof AbortSignal
+            ) {
+              const signal = args[0] as AbortSignal;
+
+              if (signal.aborted) {
+                cleanup();
+                group.stopProcessing().catch(logger.error);
+                reject(new Error("Task was cancelled"));
+                return;
+              }
+
+              signal.addEventListener(
+                "abort",
+                async () => {
+                  if (!isSettled) {
+                    isSettled = true;
+                    cleanup();
+                    await group.stopProcessing();
+                    reject(new Error("Task was cancelled"));
+                  }
+                },
+                { once: true }
+              );
+            }
           });
         }
 
-        // For non-grouped tasks
         return task.result;
       } catch (error) {
         const executionTime = Date.now() - startTime;
@@ -145,11 +187,21 @@ export function task(options: TaskOptions = {}): MethodDecorator {
           executionTime,
           group: options.group,
         });
+
+        if (taskId) {
+          queueManager.offTaskEvent(ObserverEvent.TASK_COMPLETED);
+          queueManager.offTaskEvent(ObserverEvent.TASK_FAILED);
+        }
+        clearTimeout(timeoutId);
         throw error;
       }
     };
 
-    // Ensure the method is bound to its instance and properly typed
+    Object.defineProperty(descriptor.value, "name", {
+      value: methodName,
+      configurable: true,
+    });
+
     return Object.assign(descriptor, {
       configurable: true,
       enumerable: true,

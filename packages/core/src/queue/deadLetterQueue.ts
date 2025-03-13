@@ -18,11 +18,21 @@ export class DeadLetterQueue extends EventEmitter {
   private config: DeadLetterConfig;
   private alertCount: number = 0;
 
-  constructor(config: DeadLetterConfig) {
+  constructor(
+    config: DeadLetterConfig = {
+      maxRetries: 3,
+      backoff: {
+        type: 'exponential',
+        delay: 1000,
+      },
+      alertThreshold: 10,
+    },
+    instanceId: RedisInstance = RedisInstance.DEFAULT
+  ) {
     super();
     this.config = config;
     this.dlq = new Queue('dead-letter-queue', {
-      connection: redisConnection.getInstance(RedisInstance.DEFAULT),
+      connection: redisConnection.getInstance(instanceId),
     });
 
     logger.info('File: deadLetterQueue.ts', '💀', '22', 'constructor', 'config',

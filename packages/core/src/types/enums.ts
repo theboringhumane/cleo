@@ -85,6 +85,7 @@ export enum GroupOperation {
 
 export enum GroupProcessingStrategy {
   ROUND_ROBIN = "ROUND_ROBIN",
-  FIFO = "FIFO", // Default First-In-First-Out
+  FIFO = "FIFO",
+  LIFO = "LIFO",
   PRIORITY = "PRIORITY",
 }

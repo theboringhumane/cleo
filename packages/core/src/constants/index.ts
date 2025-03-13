@@ -1,0 +1,13 @@
+export const QUEUES_SET_KEY = "cleo:queues:all";
+export const QUEUE_META_PREFIX = "cleo:queue:meta:";
+export const QUEUE_CONFIG_PREFIX = "cleo:queue:config:";
+export const QUEUE_WORKERS_PREFIX = "cleo:queue:workers:";
+export const WORKERS_SET_KEY = "cleo:workers:all";
+export const WORKER_KEY = "cleo:worker";
+export const TASK_HISTORY_KEY = "cleo:task:history:";
+export const TASK_HISTORY_EXPIRE = 60 * 60 * 24 * 30; // 30 days
+export const HEARTBEAT_KEY = "cleo:heartbeat:";
+export const HEARTBEAT_INTERVAL = 10000; // 10 seconds
+export const HEARTBEAT_EXPIRE = 60 * 60 * 24 * 30; // 30 days
+export const HEARTBEAT_TTL = 60 * 60 * 24 * 30; // 30 days
+export const HEARTBEAT_TTL_MS = HEARTBEAT_TTL * 1000;

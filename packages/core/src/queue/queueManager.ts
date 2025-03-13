@@ -1,4 +1,4 @@
-import { Queue, JobsOptions, QueueOptions } from "bullmq";
+import { Queue, JobsOptions, QueueOptions, QueueEvents } from "bullmq";
 import { Task, TaskOptions, WorkerConfig } from "../types/interfaces";
 import {
   TaskState,
@@ -10,10 +10,19 @@ import {
 import { logger } from "../utils/logger";
 import { redisConnection, RedisInstance } from "../config/redis";
 import { TaskObserver, TaskObserverCallback } from "../observers/taskObserver";
-import { TaskGroup } from "../groups/taskGroup";
+import { TaskGroup, GroupConfig } from "../groups/taskGroup";
 import { Redis } from "ioredis";
 import { Worker } from "../workers";
 import { generateUUID } from "../utils";
+import { DeadLetterQueue } from "./deadLetterQueue";
+import { QueueMetrics } from "./queueMetrics";
+import {
+  QUEUE_META_PREFIX,
+  QUEUE_CONFIG_PREFIX,
+  QUEUES_SET_KEY,
+  WORKERS_SET_KEY,
+  QUEUE_WORKERS_PREFIX,
+} from "../constants";
 
 interface GroupInfo {
   name: string;
@@ -21,62 +30,204 @@ interface GroupInfo {
   lastProcessed?: number;
 }
 
+export type WorkerType = Worker;
+export type WorkerMap = Map<string, WorkerType>;
+
 export class QueueManager {
   private queues: Map<string, Queue>;
+  private queueEvents: Map<string, QueueEvents>;
   private observer: TaskObserver;
   private groups: Map<string, TaskGroup>;
-  private groupProcessingStrategy: GroupProcessingStrategy =
-    GroupProcessingStrategy.ROUND_ROBIN;
   private redis: Redis;
   private instanceId: RedisInstance;
-  private workers: Map<string, Worker> = new Map();
-  private isProcessing: boolean = false;
-  private activeGroups: Set<string> = new Set();
-  private groupOrderKey = "queue:group:processing-order";
-  private groupInfos: Map<string, GroupInfo> = new Map();
+  private workers: WorkerMap = new Map();
+  public deadLetterQueue: DeadLetterQueue;
+  private metrics: QueueMetrics;
+  private healthCheckInterval: NodeJS.Timeout | null = null;
+
+  // Redis keys for queue tracking
+  private readonly QUEUES_SET_KEY = QUEUES_SET_KEY;
+  private readonly QUEUE_META_PREFIX = QUEUE_META_PREFIX;
+  private readonly QUEUE_CONFIG_PREFIX = QUEUE_CONFIG_PREFIX;
 
   constructor(
     defaultQueueName: string = "default",
     redisInstance: RedisInstance = RedisInstance.DEFAULT,
-    queueOptions: QueueOptions = {},
+    queueOptions: Partial<QueueOptions> = {},
     workerOptions: WorkerConfig = {}
   ) {
     this.instanceId = redisInstance;
     this.redis = redisConnection.getInstance(this.instanceId);
     this.queues = new Map();
-    queueOptions.connection = this.redis;
+    this.queueEvents = new Map();
+    this.metrics = new QueueMetrics(this.redis);
+
+    const finalQueueOptions: QueueOptions = {
+      connection: this.redis,
+      ...queueOptions,
+    };
+
     this.initializeQueue(
       defaultQueueName,
-      queueOptions,
+      finalQueueOptions,
       workerOptions,
       this.instanceId
     );
     this.observer = new TaskObserver(this.redis);
     this.groups = new Map();
+    this.deadLetterQueue = new DeadLetterQueue(
+      {
+        maxRetries: 3,
+        backoff: {
+          type: "exponential",
+          delay: 1000,
+        },
+        alertThreshold: 10,
+      },
+      this.instanceId
+    );
 
     // Initialize task observers
     this.setupTaskObservers();
+
+    // Setup queue metrics collection
+    this.startQueueMetricsCollection();
+    this.startHealthCheck();
   }
 
-  initializeQueue(
+  // Get all queues from Redis
+  async getQueues(): Promise<string[]> {
+    return await this.redis.smembers(this.QUEUES_SET_KEY);
+  }
+
+  // Get queue metadata from Redis
+  async getQueueMetadata(queueName: string): Promise<any> {
+    const metadata = await this.redis.hgetall(
+      `${this.QUEUE_META_PREFIX}${queueName}`
+    );
+    return metadata
+      ? {
+          ...metadata,
+          createdAt: new Date(parseInt(metadata.createdAt)),
+          lastActivity: new Date(parseInt(metadata.lastActivity)),
+        }
+      : null;
+  }
+
+  // Update queue metadata in Redis
+  private async updateQueueMetadata(
     queueName: string,
-    queueOptions: QueueOptions = {},
-    workerOptions: WorkerConfig = {},
-    instanceId: string = "default"
-  ): void {
-    queueOptions.connection = this.redis;
-    const queue = new Queue(queueName, queueOptions);
-    this.queues.set(queueName, queue);
-    this.initializeWorker(queueName, workerOptions, instanceId);
-    logger.info("🆕 QueueManager: Queue initialized", {
-      file: "queueManager.ts",
-      line: 50,
-      function: "initializeQueue",
-      queueName,
+    metadata: any = {}
+  ): Promise<void> {
+    const key = `${this.QUEUE_META_PREFIX}${queueName}`;
+    const now = Date.now();
+
+    await this.redis.hmset(key, {
+      ...metadata,
+      lastActivity: now,
     });
   }
 
-  private initializeWorker(
+  // Store queue configuration in Redis
+  private async storeQueueConfig(
+    queueName: string,
+    config: QueueOptions
+  ): Promise<void> {
+    const key = `${this.QUEUE_CONFIG_PREFIX}${queueName}`;
+    await this.redis.hmset(key, {
+      ...config,
+      connection: JSON.stringify(config.connection),
+    });
+  }
+
+  // Get queue configuration from Redis
+  private async getQueueConfig(
+    queueName: string
+  ): Promise<QueueOptions | null> {
+    const key = `${this.QUEUE_CONFIG_PREFIX}${queueName}`;
+    const config = await this.redis.hgetall(key);
+    if (!config || Object.keys(config).length === 0) return null;
+
+    return {
+      ...config,
+      connection: JSON.parse(config.connection),
+    };
+  }
+
+  private async initializeQueue(
+    queueName: string,
+    queueOptions: QueueOptions,
+    workerOptions: WorkerConfig = {},
+    instanceId: string = "default"
+  ): Promise<void> {
+    // Add queue to Redis set
+    await this.redis.sadd(this.QUEUES_SET_KEY, queueName);
+
+    // Store queue metadata
+    await this.updateQueueMetadata(queueName, {
+      createdAt: Date.now(),
+      instanceId,
+    });
+
+    // Store queue configuration
+    await this.storeQueueConfig(queueName, queueOptions);
+
+    const queue = new Queue(queueName, queueOptions);
+    this.queues.set(queueName, queue);
+
+    // Initialize queue events
+    const queueEvents = new QueueEvents(queueName, {
+      connection: queueOptions.connection,
+    });
+
+    queueEvents.on("completed", async ({ jobId, returnvalue }) => {
+      await this.updateQueueMetadata(queueName);
+      logger.info("✅ QueueManager: Job completed", {
+        file: "queueManager.ts",
+        function: "queueEvents",
+        queue: queueName,
+        jobId,
+        result: returnvalue,
+      });
+    });
+
+    queueEvents.on("failed", async ({ jobId, failedReason }) => {
+      await this.updateQueueMetadata(queueName);
+      logger.error("❌ QueueManager: Job failed", {
+        file: "queueManager.ts",
+        function: "queueEvents",
+        queue: queueName,
+        jobId,
+        error: failedReason,
+      });
+    });
+
+    queueEvents.on("stalled", async ({ jobId }) => {
+      await this.updateQueueMetadata(queueName);
+      logger.warn("⚠️ QueueManager: Job stalled", {
+        file: "queueManager.ts",
+        function: "queueEvents",
+        queue: queueName,
+        jobId,
+      });
+    });
+
+    queueEvents.on("progress", async ({ jobId, data }) => {
+      await this.updateQueueMetadata(queueName);
+      logger.debug("📈 QueueManager: Job progress", {
+        file: "queueManager.ts",
+        function: "queueEvents",
+        queue: queueName,
+        jobId,
+        progress: data,
+      });
+    });
+
+    this.queueEvents.set(queueName, queueEvents);
+    this.initializeWorker(queueName, workerOptions, instanceId);
+  }
+
+  initializeWorker(
     queueName: string,
     workerOptions: WorkerConfig = {},
     instanceId: string = "default"
@@ -84,14 +235,134 @@ export class QueueManager {
     const worker = new Worker(queueName, workerOptions, instanceId);
     worker.setQueueManager(this); // Connect worker with QueueManager
     this.workers.set(queueName, worker);
+    this.redis.sadd(worker.workersKey, worker.workerId);
+    this.redis.sadd(`${QUEUE_WORKERS_PREFIX}${queueName}`, worker.workerId);
   }
 
-  getWorker(queueName: string = "default"): Worker {
-    return this.workers.get(queueName)!;
+  async createQueue(
+    queueName: string,
+    queueOptions: QueueOptions
+  ): Promise<Queue> {
+    await this.initializeQueue(queueName, queueOptions);
+    const queue = this.queues.get(queueName);
+    if (!queue) {
+      throw new Error(`Failed to create queue ${queueName}`);
+    }
+    return queue;
   }
 
-  getQueue(queueName: string): Queue | null {
-    return this.queues.get(queueName) || null;
+  async getQueue(queueName: string): Promise<Queue | null> {
+    const queue = this.queues.get(queueName);
+
+    if (!queue) {
+      // Try to restore queue from Redis
+      const config = await this.getQueueConfig(queueName);
+      if (config) {
+        await this.initializeQueue(queueName, config);
+        return this.queues.get(queueName) || null;
+      }
+    }
+
+    return queue || null;
+  }
+
+  async getQueueMetrics(queueName: string) {
+    logger.info("📊 QueueManager: Getting queue metrics", {
+      file: "queueManager.ts",
+      function: "getQueueMetrics",
+      queueName,
+    });
+    return this.metrics.getMetrics(queueName);
+  }
+
+  async getLatestQueueMetrics(queueName: string) {
+    return this.metrics.getLatestMetrics(queueName);
+  }
+
+  async getAllQueueMetrics() {
+    return this.metrics.getAllQueueMetrics();
+  }
+
+  async getAllWorkers() {
+    return await this.redis.smembers(WORKERS_SET_KEY);
+  }
+
+  async getQueueWorkers(queueName: string) {
+    return await this.redis.smembers(`${QUEUE_WORKERS_PREFIX}${queueName}`);
+  }
+
+  async getWorkerById(workerId: string): Promise<WorkerType | undefined> {
+    const worker = await this.redis.sismember(WORKERS_SET_KEY, workerId);
+    if (worker) {
+      return this.workers.get(workerId);
+    }
+    return undefined;
+  }
+
+  getWorker(queueNameOrId: string = "default"): WorkerType | undefined {
+    // If not found by ID, try to find by queue name
+    return this.workers.get(queueNameOrId) as WorkerType | undefined;
+  }
+
+  private async startQueueMetricsCollection() {
+    // Collect metrics every minute
+    setInterval(async () => {
+      for (const [queueName, queue] of this.queues) {
+        try {
+          const counts = await queue.getJobCounts();
+          const waitingTime = await this.getAverageWaitingTime(queue);
+
+          const metricsData = {
+            waiting: counts.waiting || 0,
+            active: counts.active || 0,
+            completed: counts.completed || 0,
+            failed: counts.failed || 0,
+            delayed: counts.delayed || 0,
+            paused: counts.paused || 0,
+            averageWaitingTime: waitingTime,
+            timestamp: Date.now(),
+          };
+
+          // Save metrics to Redis
+          await this.metrics.saveMetrics(queueName, metricsData);
+
+          logger.info("📊 QueueManager: Queue metrics", {
+            file: "queueManager.ts",
+            function: "collectMetrics",
+            queue: queueName,
+            metrics: metricsData,
+          });
+        } catch (error) {
+          logger.error("❌ QueueManager: Failed to collect metrics", {
+            file: "queueManager.ts",
+            function: "collectMetrics",
+            queue: queueName,
+            error,
+          });
+        }
+      }
+    }, 60000);
+  }
+
+  private async getAverageWaitingTime(queue: Queue): Promise<number> {
+    try {
+      const jobs = await queue.getJobs(["waiting"], 0, 10);
+      if (jobs.length === 0) return 0;
+
+      const waitingTimes = jobs.map((job) => {
+        const createdAt = job.timestamp;
+        return Date.now() - createdAt;
+      });
+
+      return waitingTimes.reduce((a, b) => a + b, 0) / waitingTimes.length;
+    } catch (error) {
+      logger.error("❌ QueueManager: Failed to calculate waiting time", {
+        file: "queueManager.ts",
+        function: "getAverageWaitingTime",
+        error,
+      });
+      return 0;
+    }
   }
 
   async addTask(
@@ -120,37 +391,24 @@ export class QueueManager {
       updatedAt: new Date(),
     };
 
-    // If task belongs to a group, don't add it to the queue yet
-    if (options.group) {
-      logger.debug(
-        "👥 QueueManager: Task belongs to group, deferring queue addition",
-        {
-          file: "queueManager.ts",
-          line: 90,
-          function: "addTask",
-          taskId: task.id,
-          group: options.group,
-        }
-      );
-      return task;
-    }
-
-    const jobOptions: JobsOptions = {
+    const jobOptions = {
       priority: options.priority,
       attempts: options.maxRetries,
       backoff: {
         type: "exponential",
         delay: options.retryDelay || 3000,
       },
+      timeout: options.timeout || 300000, // 5 minutes
       removeOnComplete: options.removeOnComplete || false,
       repeat: options.schedule
         ? {
             pattern: options.schedule.pattern,
-            startDate: options.schedule.startDate,
-            endDate: options.schedule.endDate,
           }
         : undefined,
+      jobId: task.id,
     };
+
+    data.options = jobOptions;
 
     const job = await queue!.add(name, data, jobOptions);
 
@@ -242,19 +500,36 @@ export class QueueManager {
     return true;
   }
 
-  // Group-related methods
-  async getGroup(groupName: string): Promise<TaskGroup> {
-    if (!this.groups.has(groupName)) {
-      this.groups.set(groupName, new TaskGroup(this.redis, groupName));
-    }
-    return this.groups.get(groupName)!;
+  async getQueueTasks(queueName: string): Promise<Task[]> {
+    const queue = this.queues.get(queueName);
+    if (!queue) return [];
+
+    const jobs = await queue.getJobs();
+    return jobs.map((job) => job.data as Task);
   }
 
-  async getGroupTasks(groupName: string): Promise<Task[]> {
-    const group = await this.getGroup(groupName);
-    const taskIds = await group.getTasks();
-    const tasks = await Promise.all(taskIds.map((id) => this.getTask(id)));
-    return tasks.filter((task): task is Task => task !== null);
+  // Simplified group methods
+  async getGroup(groupName: string): Promise<TaskGroup> {
+    let group = this.groups.get(groupName);
+    
+    if (!group) {
+      const config: GroupConfig = {
+        name: groupName,
+        priority: await this.getGroupPriority(groupName),
+        concurrency: 1,
+        maxConcurrency: 10,
+        strategy: GroupProcessingStrategy.FIFO,
+        retryDelay: 3000,
+        retryLimit: 3,
+        timeout: 300000,
+      };
+
+      group = new TaskGroup(this.redis, config);
+      group.connect(this, this.workers.get(config.name) as Worker);
+      this.groups.set(groupName, group);
+    }
+
+    return group;
   }
 
   async addTaskToGroup(
@@ -262,317 +537,39 @@ export class QueueManager {
     taskOptions: TaskOptions,
     taskData: any
   ): Promise<void> {
-    const { id: taskId, group: groupName } = taskOptions;
-    const group = await this.getGroup(groupName!);
+    const { group: groupName } = taskOptions;
+    if (!groupName) {
+      throw new Error("Group name is required for group tasks");
+    }
 
-    // Add task to group first
+    const group = await this.getGroup(groupName);
     await group.addTask(methodName, taskOptions, taskData);
-
-    // Initialize group info if needed
-    if (!this.groupInfos.has(groupName!)) {
-      this.groupInfos.set(groupName!, {
-        name: groupName!,
-        priority: await this.getGroupPriority(groupName!),
-        lastProcessed: Date.now(),
-      });
-    }
-
-    this.activeGroups.add(groupName!);
-
-    // Notify about group change
-    this.observer.notify(
-      ObserverEvent.GROUP_CHANGE,
-      taskId!,
-      TaskStatus.ACTIVE,
-      {
-        group: groupName,
-        operation: GroupOperation.ADD,
-      }
-    );
-
-    // Get all tasks that should be queued for this group
-    const allGroupTasks = await group.getAllTasks();
-    for (const [taskId, queueName] of allGroupTasks) {
-      const isQueued = await this.isTaskQueued(taskId, queueName);
-      if (!isQueued) {
-        await this.addTaskToQueue(taskId, groupName!, queueName);
-      }
-    }
-
-    // Start processing only after all necessary tasks are queued
-    if (!this.isProcessing) {
-      await this.processGroupTasks();
-    }
+    await group.startProcessing();
   }
 
-  // New helper method to check if a task is already queued
-  private async isTaskQueued(
-    taskId: string,
-    queueName: string
-  ): Promise<boolean> {
-    const queue = this.queues.get(queueName);
-    if (!queue) return false;
-
-    const job = await queue.getJob(taskId);
-    return !!job;
-  }
-
-  // New helper method to handle queue addition
-  private async addTaskToQueue(
-    taskId: string,
-    groupName: string,
-    queueName: string
-  ): Promise<void> {
-    const task = await this.getGroup(groupName).then((group) =>
-      group.getTaskOptionsAndData(taskId)
-    );
-
-    if (!task) {
-      this.observer.notify(
-        ObserverEvent.TASK_FAILED,
-        taskId,
-        TaskStatus.FAILED,
-        {
-          group: groupName,
-          error: "Task not found",
-        }
-      );
-      return;
-    }
-
-    const queue = this.queues.get(queueName);
+  async ensureTaskInQueue(task: Task, queueName: string): Promise<void> {
+    const queue = await this.getQueue(queueName);
     if (!queue) {
-      this.observer.notify(
-        ObserverEvent.TASK_FAILED,
-        taskId,
-        TaskStatus.FAILED,
-        {
-          group: groupName,
-          error: "Queue not found",
-        }
-      );
-      return;
+      throw new Error(`Queue ${queueName} not found`);
     }
 
-    const jobOptions: JobsOptions = {
-      jobId: taskId, // Using jobId consistently
-      priority: task.options.priority,
-      attempts: task.options.maxRetries,
-      backoff: task.options.backoff,
-      removeOnComplete: task.options.removeOnComplete || false,
-      repeat: task.options.schedule
-        ? {
-            pattern: task.options.schedule.pattern,
-            startDate: task.options.schedule.startDate,
-            endDate: task.options.schedule.endDate,
-          }
-        : undefined,
-    };
-
-    const job = await queue.add(task.method!, task.data, jobOptions);
-
-    logger.debug("🔄 QueueManager: Task added to queue", {
-      file: "queueManager.ts",
-      function: "addTaskToQueue",
-      jobId: job.id,
-      queueName,
-      groupName,
-    });
-
-    task.options.group = groupName;
-
-    this.observer.notify(
-      ObserverEvent.TASK_ADDED,
-      taskId,
-      TaskStatus.WAITING,
-      task,
-    );
-  }
-
-  private async getNextGroupByStrategy(): Promise<string | null> {
-    const activeGroups = Array.from(this.activeGroups);
-    if (activeGroups.length === 0) return null;
-
-    switch (this.groupProcessingStrategy) {
-      case GroupProcessingStrategy.ROUND_ROBIN:
-        return this.getNextRoundRobinGroup(activeGroups);
-      case GroupProcessingStrategy.FIFO:
-        return this.getNextFifoGroup(activeGroups);
-      case GroupProcessingStrategy.PRIORITY:
-        return this.getNextPriorityGroup(activeGroups);
-      default:
-        return activeGroups[0];
-    }
-  }
-
-  /**
-   * Gets the next task to process based on the current group processing strategy
-   * This method is used by tests and external integrations
-   */
-  async getNextGroupTask(): Promise<Task | null> {
-    const nextGroupName = await this.getNextGroupByStrategy();
-    if (!nextGroupName) return null;
-
-    const group = await this.getGroup(nextGroupName);
-    const nextTask = await group.getNextTask();
-
-    if (!nextTask) {
-      this.activeGroups.delete(nextGroupName);
-      this.groupInfos.delete(nextGroupName);
-      return this.getNextGroupTask(); // Recursively try next group
-    }
-
-    const [taskId, queueName] = nextTask;
-    const task = await this.getTask(taskId, queueName);
-    if (task) {
-      // Update last processed time
-      const groupInfo = this.groupInfos.get(nextGroupName);
-      if (groupInfo) {
-        groupInfo.lastProcessed = Date.now();
-      }
-      return task;
-    } else {
-      logger.info("🚀 ~ getNextGroupTask ~ task", {
-        file: "queueManager.ts",
-        line: 380,
-        function: "getNextGroupTask",
-        task,
+    const existingJob = await queue.getJob(task.id);
+    if (!existingJob) {
+      await queue.add(task.name, task.data, {
+        jobId: task.id,
+        ...task.options,
       });
     }
-
-    return null;
   }
 
-  private async getNextRoundRobinGroup(
-    activeGroups: string[]
-  ): Promise<string | null> {
-    // Get the least recently processed group
-    const groupInfos = activeGroups.map((name) => this.groupInfos.get(name)!);
-    const sortedGroups = groupInfos.sort(
-      (a, b) => (a.lastProcessed || 0) - (b.lastProcessed || 0)
-    );
-
-    return sortedGroups[0]?.name || null;
+  async completeGroupTask(taskId: string, groupName: string): Promise<void> {
+    const group = await this.getGroup(groupName);
+    await group.completeTask(taskId);
   }
 
-  private async getNextFifoGroup(
-    activeGroups: string[]
-  ): Promise<string | null> {
-    // Get the group that was added first
-    const groupInfos = activeGroups.map((name) => this.groupInfos.get(name)!);
-    const sortedGroups = groupInfos.sort(
-      (a, b) => (a.lastProcessed || 0) - (b.lastProcessed || 0)
-    );
-
-    return sortedGroups[0]?.name || null;
-  }
-
-  private async getNextPriorityGroup(
-    activeGroups: string[]
-  ): Promise<string | null> {
-    // Get group priorities and sort by highest priority
-    const groupInfos = await Promise.all(
-      activeGroups.map(async (name) => ({
-        name,
-        priority: await this.getGroupPriority(name),
-      }))
-    );
-
-    const sortedGroups = groupInfos.sort((a, b) => b.priority - a.priority);
-    return sortedGroups[0]?.name || null;
-  }
-
-  async processGroupTasks(): Promise<void> {
-    if (this.isProcessing) return;
-    this.isProcessing = true;
-
-    try {
-      while (this.activeGroups.size > 0) {
-        const nextGroupName = await this.getNextGroupByStrategy();
-        logger.debug("🚀 ~ processGroupTasks ~ nextGroupName", {
-          file: "queueManager.ts",
-          line: 438,
-          function: "processGroupTasks",
-          nextGroupName,
-        });
-        if (!nextGroupName) {
-          this.isProcessing = false;
-          return;
-        }
-
-        const group = await this.getGroup(nextGroupName);
-        const nextTask = await group.getNextTask();
-        if (!nextTask) {
-          this.activeGroups.delete(nextGroupName);
-          this.groupInfos.delete(nextGroupName);
-          continue;
-        }
-
-        const [nextTaskId, queueName] = nextTask;
-        logger.info("🚀 ~ processGroupTasks ~ nextTaskId", {
-          file: "queueManager.ts",
-          line: 445,
-          function: "processGroupTasks",
-          nextTaskId,
-          queueName,
-        });
-
-        if (nextTaskId) {
-          const task = await this.getTask(nextTaskId, queueName);
-          if (task) {
-            await this.processTask(task, nextGroupName);
-            // Update last processed time
-            const groupInfo = this.groupInfos.get(nextGroupName);
-            if (groupInfo) {
-              groupInfo.lastProcessed = Date.now();
-            }
-          }
-        } else {
-          this.activeGroups.delete(nextGroupName);
-          this.groupInfos.delete(nextGroupName);
-        }
-
-        // Small delay between tasks to prevent CPU overload
-        await new Promise((resolve) => setTimeout(resolve, 50));
-      }
-    } finally {
-      this.isProcessing = false;
-    }
-  }
-
-  private async getGroupPriority(groupName: string): Promise<number> {
-    const priorityKey = `group:${groupName}:priority`;
-    const priority = await this.redis.get(priorityKey);
-    return priority ? parseInt(priority, 10) : 0;
-  }
-
-  async setGroupPriority(groupName: string, priority: number): Promise<void> {
-    const priorityKey = `group:${groupName}:priority`;
-    await this.redis.set(priorityKey, priority.toString());
-
-    // Update in-memory group info
-    const groupInfo = this.groupInfos.get(groupName);
-    if (groupInfo) {
-      groupInfo.priority = priority;
-    }
-
-    logger.info("⚡ QueueManager: Group priority updated", {
-      file: "queueManager.ts",
-      line: 200,
-      function: "setGroupPriority",
-      groupName,
-      priority,
-    });
-  }
-
-  setGroupProcessingStrategy(strategy: GroupProcessingStrategy): void {
-    this.groupProcessingStrategy = strategy;
-    logger.info("⚙️ QueueManager: Group processing strategy updated", {
-      file: "queueManager.ts",
-      line: 210,
-      function: "setGroupProcessingStrategy",
-      strategy,
-    });
+  async getAllGroups(): Promise<string[]> {
+    const keys = await this.redis.keys("group:*:tasks");
+    return keys.map((key) => key.split(":")[1]);
   }
 
   // Event handling methods
@@ -588,12 +585,10 @@ export class QueueManager {
     // Listen for task additions to groups
     this.observer.subscribe(
       ObserverEvent.TASK_ADDED,
-      (taskId, status, data) => {
+      async (taskId, status, data) => {
         if (data?.options?.group) {
-          this.activeGroups.add(data.options.group);
-          if (!this.isProcessing) {
-            this.processGroupTasks().catch(console.error);
-          }
+          const group = await this.getGroup(data.options.group);
+          await group.startProcessing();
         }
       }
     );
@@ -605,10 +600,7 @@ export class QueueManager {
         const groupName = data?.options?.group ?? data?.group;
         if (groupName) {
           const group = await this.getGroup(groupName);
-          const hasMoreTasks = await group.hasAvailableTasks();
-          if (!hasMoreTasks) {
-            this.activeGroups.delete(groupName);
-          }
+          await group.completeTask(taskId);
         }
       }
     );
@@ -621,7 +613,6 @@ export class QueueManager {
         if (groupName) {
           logger.error("❌ QueueManager: Task failed in group", {
             file: "queueManager.ts",
-            line: 70,
             function: "setupTaskObservers",
             taskId,
             group: groupName,
@@ -637,7 +628,6 @@ export class QueueManager {
       (taskId, status, data) => {
         logger.debug("📊 QueueManager: Task progress update", {
           file: "queueManager.ts",
-          line: 82,
           function: "setupTaskObservers",
           taskId,
           progress: data.progress,
@@ -646,58 +636,9 @@ export class QueueManager {
     );
   }
 
-  private async processTask(task: Task, groupName: string): Promise<void> {
-    const lockValue = Date.now().toString();
-    
-    try {
-      const acquired = await this.acquireGroupLock(groupName, lockValue);
-
-      if (!acquired) {
-        logger.debug("🔒 QueueManager: Could not acquire group lock", {
-          file: "queueManager.ts",
-          function: "processTask",
-          groupName,
-          taskId: task.id
-        });
-        return;
-      }
-
-      const queueName = task.options.queue || "default";
-      await this.ensureTaskInQueue(task, queueName);
-      task.state = TaskState.WAITING;
-      await this.updateTask(task);
-
-    } catch (error) {
-      logger.error("❌ QueueManager: Task processing failed", {
-        file: "queueManager.ts", 
-        function: "processTask",
-        error
-      });
-      throw error;
-    } finally {
-      await this.releaseGroupLock(groupName, lockValue);
-    }
-  }
-
-  // Add new method to ensure task is in queue
-  async ensureTaskInQueue(task: Task, queueName: string): Promise<void> {
-    const queue = this.getQueue(queueName);
-    if (!queue) {
-      throw new Error(`Queue ${queueName} not found`);
-    }
-    const existingJob = await queue.getJob(task.id);
-
-    if (!existingJob) {
-      await queue.add(task.name, task.data, {
-        jobId: task.id,
-        ...task.options,
-      });
-    }
-  }
-
   async updateTask(task: Task): Promise<void> {
     const queueName = task.options.queue || "default";
-    const queue = this.queues.get(queueName);
+    const queue = await this.getQueue(queueName);
 
     if (!queue) {
       throw new Error(`Queue ${queueName} not found`);
@@ -724,79 +665,63 @@ export class QueueManager {
   }
 
   async close(): Promise<void> {
-    this.isProcessing = false;
     await this.observer.close();
     await Promise.all(
       Array.from(this.queues.values()).map((queue) => queue.close())
     );
-    this.queues.clear();
+    await Promise.all(
+      Array.from(this.queueEvents.values()).map((events) => events.close())
+    );
+    await this.deadLetterQueue.close();
   }
 
-  async completeGroupTask(taskId: string, groupName: string): Promise<void> {
-    const group = await this.getGroup(groupName);
-    await group.completeTask(taskId);
+  startHealthCheck(interval: number = 60000): void {
+    if (this.healthCheckInterval) {
+      clearInterval(this.healthCheckInterval);
+    }
 
-    // Get next task in group and add it to queue
-    const nextTask = await group.getNextTask();
-    if (nextTask) {
-      const [nextTaskId, queueName] = nextTask;
-      const task = await this.getTask(nextTaskId, queueName);
-      if (task) {
-        const queueName = task.options.queue || "default";
-        const queue = this.queues.get(queueName);
-        if (queue) {
-          const jobOptions: JobsOptions = {
-            priority: task.options.priority,
-            attempts: task.options.maxRetries,
-            backoff: {
-              type: "exponential",
-              delay: task.options.retryDelay || 3000,
-            },
-            removeOnComplete: task.options.removeOnComplete || false,
-            repeat: task.options.schedule
-              ? {
-                  pattern: task.options.schedule.pattern,
-                  startDate: task.options.schedule.startDate,
-                  endDate: task.options.schedule.endDate,
-                }
-              : undefined,
-          };
-
-          await queue.add(task.name, task.data, {
-            ...jobOptions,
-            jobId: task.id,
-          });
-
-          logger.debug("➡️ QueueManager: Added next group task to queue", {
-            file: "queueManager.ts",
-            line: 220,
-            function: "completeGroupTask",
-            taskId: nextTaskId,
-            group: groupName,
-          });
+    this.healthCheckInterval = setInterval(async () => {
+      try {
+        // Check all active groups
+        for (const groupName of this.groups.keys()) {
+          const group = await this.getGroup(groupName);
+          await group.recoverStuckTasks();
         }
+
+        // Clean up inactive groups
+        const allGroups = await this.getAllGroups();
+        for (const groupName of allGroups) {
+          const group = await this.getGroup(groupName);
+          const hasActiveTasks = await group.hasAvailableTasks();
+          if (!hasActiveTasks) {
+            this.groups.delete(groupName);
+          }
+        }
+      } catch (error) {
+        logger.error("❌ QueueManager: Health check failed", {
+          file: "queueManager.ts",
+          function: "healthCheck",
+          error,
+        });
       }
-    } else {
-      this.activeGroups.delete(groupName);
-      this.groupInfos.delete(groupName);
+    }, interval);
+  }
+
+  stopHealthCheck(): void {
+    if (this.healthCheckInterval) {
+      clearInterval(this.healthCheckInterval);
+      this.healthCheckInterval = null;
     }
   }
 
-  async acquireGroupLock(groupName: string, holder: string, ttlMs: number = 5000): Promise<boolean> {
-    const lockKey = `group:${groupName}:lock`;
-    const result = await this.redis.set(lockKey, holder, 'EX', Math.ceil(ttlMs/1000));
-    return result === 'OK';
+  private async getGroupPriority(groupName: string): Promise<number> {
+    const priority = await this.redis.hget('group:priorities', groupName);
+    return priority ? parseInt(priority) : 0;
   }
 
-  async releaseGroupLock(groupName: string, holder: string): Promise<void> {
-    const lockKey = `group:${groupName}:lock`;
-    const script = `
-      if redis.call("get", KEYS[1]) == ARGV[1] then
-        return redis.call("del", KEYS[1])
-      else
-        return 0
-      end
-    `;
-    await this.redis.eval(script, 1, lockKey, holder);
+  async setGroupPriority(groupName: string, priority: number): Promise<void> {
+    await this.redis.hset('group:priorities', groupName, priority.toString());
+    const group = await this.getGroup(groupName);
+    await group.updateConfig({ priority });
   }
 }

@@ -5,8 +5,10 @@ import { logger } from "../utils/logger";
 /**
  * Class decorator that automatically queues all methods of a class
  */
-export function QueueClass(options: QueueClassOptions = {}) {
-  return function <T extends { new (...args: any[]): any }>(constructor: T) {
+export function QueueClass<T extends { new (...args: any[]): any }>(
+  options: QueueClassOptions = {}
+) {
+  return function (constructor: T): T {
     logger.info("🏗️ QueueClass: Decorating class", {
       file: "class.ts",
       line: 24,
@@ -39,80 +41,99 @@ export function QueueClass(options: QueueClassOptions = {}) {
 
         // Apply task decorator to each method
         methodsToQueue.forEach((methodName) => {
+          if (isConstructor(methodName)) return;
+
           const originalMethod = this[methodName];
-          if (typeof originalMethod === "function" && !isConstructor(methodName)) {
-            const methodOptions: TaskOptions = {
-              ...options.defaultOptions,
-              queue: options.queue,
-              group: groupName, // Add group to task options
-            };
+          if (typeof originalMethod !== "function") return;
 
-            logger.debug("🔄 QueueClass: Configuring method with group", {
+          const methodOptions: TaskOptions = {
+            ...options.defaultOptions,
+            queue: options.queue,
+            group: groupName,
+          };
+
+          logger.debug("🔄 QueueClass: Configuring method with group", {
+            file: "class.ts",
+            line: 50,
+            function: "constructor",
+            className: constructor.name,
+            methodName,
+            groupName,
+          });
+
+          // Create a bound version of the original method
+          const boundMethod = originalMethod.bind(this);
+
+          // Create a property descriptor for the task decorator
+          const descriptor: TypedPropertyDescriptor<any> = {
+            configurable: true,
+            enumerable: true,
+            writable: true,
+            value: boundMethod,
+          };
+
+          // Apply the task decorator
+          const decoratedDescriptor = task(methodOptions)(
+            this,
+            methodName,
+            descriptor
+          );
+
+          if (!decoratedDescriptor) {
+            logger.error("❌ QueueClass: Failed to decorate method", {
               file: "class.ts",
-              line: 50,
+              line: 89,
               function: "constructor",
-              className: constructor.name,
               methodName,
-              groupName,
             });
+            return;
+          }
 
-            // Create a bound version of the original method
-            const boundMethod = originalMethod.bind(this);
+          // Store both the original and decorated methods
+          Object.defineProperty(this, methodName, {
+            ...decoratedDescriptor,
+            configurable: true,
+            enumerable: true,
+          });
 
-            // Create a property descriptor for the task decorator
-            const descriptor: TypedPropertyDescriptor<any> = {
+          // Store the original method for direct access
+          Object.defineProperty(this, `_original_${methodName}`, {
+            value: boundMethod,
+            writable: false,
+            enumerable: false,
+          });
+
+          // Preserve method metadata
+          if (originalMethod.hasOwnProperty("name")) {
+            Object.defineProperty(decoratedDescriptor.value, "name", {
+              value: originalMethod.name,
               configurable: true,
-              enumerable: true,
-              writable: true,
-              value: boundMethod
-            };
-
-            // Apply the task decorator and ensure we get a PropertyDescriptor back
-            const decoratedDescriptor = task(methodOptions)(
-              this,
-              methodName,
-              descriptor
-            ) as TypedPropertyDescriptor<any>;
-
-            if (!decoratedDescriptor) {
-              logger.error("❌ QueueClass: Failed to decorate method", {
-                file: "class.ts",
-                line: 89,
-                function: "constructor",
-                methodName,
-              });
-              return;
-            }
-
-            // Store both the original and decorated methods
-            Object.defineProperty(this, methodName, {
-              configurable: true,
-              enumerable: true,
-              value: decoratedDescriptor.value,
-              writable: true
-            });
-
-            // Also store the original method for direct access if needed
-            Object.defineProperty(this, `_original_${methodName}`, {
-              value: boundMethod,
-              writable: false,
-              enumerable: false
-            });
-
-            logger.debug("🔄 QueueClass: Method decorated", {
-              file: "class.ts",
-              line: 60,
-              function: "constructor",
-              className: constructor.name,
-              methodName,
-              groupName,
             });
           }
+
+          logger.debug("🔄 QueueClass: Method decorated", {
+            file: "class.ts",
+            line: 60,
+            function: "constructor",
+            className: constructor.name,
+            methodName,
+            groupName,
+          });
         });
       }
     };
 
-    // Copy static properties
+    // Copy static properties and methods
+    Object.getOwnPropertyNames(constructor).forEach((prop) => {
+      if (prop !== "prototype" && prop !== "name" && prop !== "length") {
+        const descriptor = Object.getOwnPropertyDescriptor(constructor, prop);
+        if (descriptor) {
+          Object.defineProperty(decoratedClass, prop, descriptor);
+        }
+      }
+    });
+
+    // Preserve the original class name
     Object.defineProperty(decoratedClass, "name", {
       value: constructor.name,
       writable: false,

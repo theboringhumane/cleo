@@ -32,6 +32,7 @@ export class RedisConnection {
       password: config.REDIS_PASSWORD,
       tls: config.REDIS_TLS === 'true' ? {} : undefined,
       db: config.REDIS_DB ? parseInt(config.REDIS_DB, 10) : 0,
+      maxRetriesPerRequest: null,
     };
 
     const connection = new Redis(redisConfig);

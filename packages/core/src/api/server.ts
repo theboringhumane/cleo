@@ -1,11 +1,20 @@
 import fastify, { FastifyInstance } from "fastify";
 import { logger } from "../utils/logger";
 import queueRoutes from "./routes/queues";
+import groupRoutes from "./routes/groups";
+import workerRoutes from "./routes/workers";
 import { Cleo } from "../index";
+import cors from "@fastify/cors";
 
 export async function createServer(cleo: Cleo): Promise<FastifyInstance> {
   const server = fastify({
-    logger: false, // We'll use our own logger
+    logger: false, // We'll use our own logger,
+  });
+
+  server.register(cors, {
+    origin: "*",
+    methods: ["GET", "POST", "PUT", "DELETE"],
+    allowedHeaders: ["Content-Type", "Authorization"],
   });
 
   // @ts-expect-error - TODO: fix this
@@ -13,6 +22,8 @@ export async function createServer(cleo: Cleo): Promise<FastifyInstance> {
 
   // Register routes
   await server.register(queueRoutes);
+  await server.register(groupRoutes);
+  await server.register(workerRoutes);
 
   // Error handler
   server.setErrorHandler((error, request, reply) => {

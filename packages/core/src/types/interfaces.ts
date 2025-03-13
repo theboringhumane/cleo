@@ -31,6 +31,8 @@ export interface TaskOptions {
   group?: string;
   /** Remove the task from the queue after completion */
   removeOnComplete?: boolean;
+  /** Weight of the task within its group (higher weight = higher priority) */
+  weight?: number;
 }
 
 /**
@@ -198,9 +200,45 @@ export interface QueueClassOptions {
 }
 
 /**
+ * Task history entry
+ */
+export interface TaskHistoryEntry {
+  taskId: string;
+  timestamp: string;
+  status: string;
+  duration: number;
+  error?: any;
+  group?: string;
+}
+
+/**
+ * Worker metrics
+ */
+export interface WorkerMetrics {
+  tasksProcessed: number;
+  tasksSucceeded: number;
+  tasksFailed: number;
+  averageProcessingTime: number;
+  totalProcessingTime?: number;
+}
+
+/**
  * Worker interface
  */
 export interface Worker {
-  registerTask(name: string, handler: Function): void;
-  getRegisteredTasks(): string[];
+  id: string;
+  queue: string;
+  status: string;
+  activeTasks: any[];
+  metrics: WorkerMetrics;
+  lastHeartbeat: string;
+  isActive: boolean;
+  history?: TaskHistoryEntry[];
+  getStatus?: () => Promise<string>;
+  getActiveTasks?: () => Promise<string[]>;
+  getMetrics?: () => Promise<WorkerMetrics>;
+  getTaskHistory?: () => Promise<TaskHistoryEntry[]>;
+  getMetricsHistory?: () => Promise<(WorkerMetrics & { timestamp: string })[]>;
+  pause?: () => Promise<void>;
+  resume?: () => Promise<void>;
 }

@@ -10,6 +10,7 @@ import type {
 import { logger } from "./utils/logger";
 import { redisConnection, RedisInstance } from "./config/redis";
 import { initializeTaskDecorator } from "./decorators/task";
+import { WorkerManager } from "./workers/workerManager";
 
 // Create a Cleo class to manage configuration
 class Cleo {
@@ -76,8 +77,12 @@ class Cleo {
       // Initialize Redis connection for this instance
       redisConnection.initializeInstance(this.instanceId, redisConfig);
 
-      this.queueManager = new QueueManager('default', this.instanceId, {
-      }, config.worker);
+      this.queueManager = new QueueManager(
+        "default",
+        this.instanceId,
+        {},
+        config.worker
+      );
 
       // Initialize task decorator with this instance
       initializeTaskDecorator(this);
@@ -110,8 +115,12 @@ class Cleo {
     return this.queueManager!;
   }
 
-  getWorker(queueName: string): Worker {
+  getWorker(queueName: string): Worker | undefined {
     return this.queueManager!.getWorker(queueName);
+  }
+
+  getWorkerManager(): WorkerManager {
+    return WorkerManager.getInstance(this.instanceId);
   }
 }
 
@@ -127,16 +136,16 @@ export {
 };
 
 // Export the queue manager
-export { QueueManager } from './queue/queueManager';
+export { QueueManager } from "./queue/queueManager";
 
 // Export the task group functionality
-export { TaskGroup } from './groups/taskGroup';
+export { TaskGroup, type GroupConfig } from "./groups/taskGroup";
 
 // Export the observer types
 export {
   TaskObserver,
-  type TaskObserverCallback
-} from './observers/taskObserver';
+  type TaskObserverCallback,
+} from "./observers/taskObserver";
 
 // Export all enums from a single source
 export {
@@ -146,18 +155,19 @@ export {
   LogLevel,
   ObserverEvent,
   GroupOperation,
+  GroupProcessingStrategy,
   WorkerState,
-} from './types/enums';
+} from "./types/enums";
 
 // Export the worker
-export { Worker } from './workers';
+export { Worker } from "./workers";
 
 /**
  * Example usage:
- * 
+ *
  * // Create a queue manager
  * const queueManager = new QueueManager('default');
- * 
+ *
  * // Subscribe to task events
  * queueManager.onTaskEvent(ObserverEvent.STATUS_CHANGE, (taskId, status, data) => {
  *   logger.info('File: index.ts 📝, Line: 8, Function: onTaskEvent; Task status changed', {
@@ -166,18 +176,18 @@ export { Worker } from './workers';
  *     data
  *   });
  * });
- * 
+ *
  * // Create a task group and add tasks
  * await queueManager.addTaskToGroup('task-1', 'important-tasks');
  * await queueManager.addTaskToGroup('task-2', 'important-tasks');
- * 
+ *
  * // Get all tasks in a group
  * const tasks = await queueManager.getGroupTasks('important-tasks');
- * logger.info('File: index.ts 📋, Line: 17, Function: example; Retrieved group tasks', { 
+ * logger.info('File: index.ts 📋, Line: 17, Function: example; Retrieved group tasks', {
  *   groupName: 'important-tasks',
- *   tasks 
+ *   tasks
  * });
- * 
+ *
  * // Remove a task from a group
  * await queueManager.removeTaskFromGroup('task-1', 'important-tasks');
  * logger.info('File: index.ts 🗑️, Line: 23, Function: example; Removed task from group', {
