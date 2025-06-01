@@ -5,6 +5,7 @@ import type { Task, TaskOptions } from "../types/interfaces";
 import type { Worker } from "../workers";
 import { QueueManager } from "../queue/queueManager";
 import { retryWithBackoff } from "../utils/retryWithBackoff";
+import { GroupLock } from "../utils/groupLock";
 
 export interface GroupStats {
   total: number;
@@ -40,6 +41,8 @@ export class TaskGroup {
   private config: GroupConfig;
   private rateLimitKey: string;
   private lockKey: string;
+  private groupLock: GroupLock;
+  private lockHolder: string;
   private isProcessing: boolean = false;
   private processingInterval: NodeJS.Timeout | null = null;
 
@@ -64,12 +67,17 @@ export class TaskGroup {
     this.rateLimitKey = `group:${name}:rateLimit`;
     this.lockKey = `group:${name}:lock`;
 
+    // Initialize GroupLock and create unique lock holder ID
+    this.groupLock = new GroupLock(this.redis);
+    this.lockHolder = `${process.pid}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+
     logger.info("👥 TaskGroup: initialized", {
       file: "taskGroup.ts",
       line: 20,
       function: "constructor",
       groupName: name,
       config: this.config,
+      lockHolder: this.lockHolder,
     });
   }
 
@@ -87,19 +95,60 @@ export class TaskGroup {
   }
 
   private async acquireLock(timeout: number = 5000): Promise<boolean> {
-    const lockValue = Date.now().toString();
-    const acquired = await this.redis.set(
-      this.lockKey,
-      lockValue,
-      "PX",
-      timeout,
-      "NX"
-    );
-    return !!acquired;
+    try {
+      const acquired = await this.groupLock.acquireLock(this.config.name, this.lockHolder, timeout);
+      
+      if (acquired) {
+        logger.debug("🔒 TaskGroup: Lock acquired", {
+          file: "taskGroup.ts",
+          function: "acquireLock",
+          groupName: this.config.name,
+          lockHolder: this.lockHolder,
+          timeout,
+        });
+      } else {
+        logger.debug("⏳ TaskGroup: Failed to acquire lock", {
+          file: "taskGroup.ts",
+          function: "acquireLock",
+          groupName: this.config.name,
+          lockHolder: this.lockHolder,
+          timeout,
+        });
+      }
+      
+      return acquired;
+    } catch (error) {
+      logger.error("❌ TaskGroup: Error acquiring lock", {
+        file: "taskGroup.ts",
+        function: "acquireLock",
+        groupName: this.config.name,
+        lockHolder: this.lockHolder,
+        error,
+      });
+      return false;
+    }
   }
 
   private async releaseLock(): Promise<void> {
-    await this.redis.del(this.lockKey);
+    try {
+      await this.groupLock.releaseLock(this.config.name, this.lockHolder);
+      
+      logger.debug("🔓 TaskGroup: Lock released", {
+        file: "taskGroup.ts",
+        function: "releaseLock",
+        groupName: this.config.name,
+        lockHolder: this.lockHolder,
+      });
+    } catch (error) {
+      logger.error("❌ TaskGroup: Error releasing lock", {
+        file: "taskGroup.ts",
+        function: "releaseLock",
+        groupName: this.config.name,
+        lockHolder: this.lockHolder,
+        error,
+      });
+      throw error;
+    }
   }
 
   private async checkRateLimit(): Promise<boolean> {
@@ -900,6 +949,25 @@ export class TaskGroup {
 
   async cleanup(): Promise<void> {
     try {
+      // Stop processing if running
+      if (this.isProcessing) {
+        await this.stopProcessing();
+      }
+
+      // Release any held locks
+      try {
+        await this.releaseLock();
+      } catch (error) {
+        // Lock might not be held, which is fine
+        logger.debug("🔓 TaskGroup: Lock release during cleanup", {
+          file: "taskGroup.ts",
+          function: "cleanup",
+          groupName: this.config.name,
+          lockHolder: this.lockHolder,
+          note: "Lock might not have been held",
+        });
+      }
+
       // Get all keys related to this group
       const keys = await this.redis.keys(`group:${this.config.name}:*`);
 
@@ -912,6 +980,7 @@ export class TaskGroup {
         function: "cleanup",
         groupName: this.config.name,
         keysRemoved: keys.length,
+        lockHolder: this.lockHolder,
       });
     } catch (error) {
       logger.error("❌ TaskGroup: Failed to cleanup group", {
