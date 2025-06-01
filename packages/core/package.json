@@ -33,7 +33,7 @@
   "author": "",
   "license": "MIT",
   "dependencies": {
-    "bullmq": "latest",
+    "bullmq": "5.53.1",
     "ioredis": "latest",
     "pino": "latest",
     "pino-pretty": "latest",

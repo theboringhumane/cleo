@@ -1,10 +1,9 @@
-import { Queue, JobsOptions, QueueOptions, QueueEvents } from "bullmq";
+import { Queue, QueueOptions, QueueEvents } from "bullmq";
 import { Task, TaskOptions, WorkerConfig } from "../types/interfaces";
 import {
   TaskState,
   TaskStatus,
   ObserverEvent,
-  GroupOperation,
   GroupProcessingStrategy,
 } from "../types/enums";
 import { logger } from "../utils/logger";
