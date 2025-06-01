@@ -21,10 +21,7 @@
     "start": "node dist/server.js",
     "clean": "rimraf dist coverage",
     "example:basic": "ts-node examples/basic.ts",
-    "example:advanced": "ts-node examples/advanced.ts",
-    "api:start": "ts-node src/api/server.ts",
-    "api:dev": "ts-node src/api/server.ts --watch"
-  },
+    "example:advanced": "ts-node examples/advanced.ts"  },
   "keywords": [
     "task-queue",
     "celery",
@@ -36,13 +33,8 @@
   "author": "",
   "license": "MIT",
   "dependencies": {
-    "@fastify/cors": "latest",
-    "@fastify/swagger": "latest",
-    "@fastify/swagger-ui": "latest",
     "bullmq": "latest",
-    "fastify": "latest",
     "ioredis": "latest",
-    "node-cron": "latest",
     "pino": "latest",
     "pino-pretty": "latest",
     "winston": "latest",
@@ -52,7 +44,6 @@
     "@types/ioredis-mock": "latest",
     "@types/jest": "latest",
     "@types/node": "latest",
-    "@types/node-cron": "latest",
     "@types/supertest": "latest",
     "@types/ws": "latest",
     "@typescript-eslint/eslint-plugin": "latest",
@@ -75,7 +66,7 @@
     "ioredis": "latest"
   },
   "engines": {
-    "node": ">=20.0.0"
+    "node": ">=22.0.0"
   },
   "directories": {
     "example": "examples"
