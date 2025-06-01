@@ -29,8 +29,8 @@ export class ResultCache {
 
     this.memoryCache = new Map();
     
-    // Share the existing Redis connection
-    this.redis = new Redis(redisConnection as RedisOptions);
+    // Use the existing authenticated Redis connection
+    this.redis = redisConnection.getInstance('default');
 
     logger.info('File: resultCache.ts', '💾', '25', 'constructor', 'config', 
       `Result cache initialized with strategy: ${this.config.strategy}`);

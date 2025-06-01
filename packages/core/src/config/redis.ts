@@ -44,10 +44,31 @@ export class RedisConnection {
     );
 
     connection.on('error', (error) => {
-      logger.error(
-        "File: redis.ts ❌, Line: 30, Function: initializeInstance; Redis connection error",
-        { error, instanceId }
-      );
+      // Enhanced error handling for authentication issues
+      if (error.message && error.message.includes('NOAUTH')) {
+        logger.error(
+          "File: redis.ts 🔐, Line: 30, Function: initializeInstance; Redis authentication required - please provide correct password",
+          { 
+            error: 'NOAUTH Authentication required', 
+            instanceId,
+            hint: 'Make sure to configure Redis password in cleo.configure({ redis: { password: "your-redis-password" } })'
+          }
+        );
+      } else if (error.message && error.message.includes('WRONGPASS')) {
+        logger.error(
+          "File: redis.ts 🔐, Line: 30, Function: initializeInstance; Redis authentication failed - incorrect password",
+          { 
+            error: 'WRONGPASS Invalid password', 
+            instanceId,
+            hint: 'Check your Redis password configuration'
+          }
+        );
+      } else {
+        logger.error(
+          "File: redis.ts ❌, Line: 30, Function: initializeInstance; Redis connection error",
+          { error, instanceId }
+        );
+      }
     });
 
     return connection;
