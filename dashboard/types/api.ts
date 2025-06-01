@@ -1,27 +1,42 @@
-export interface Task {
-  id: string;
-  name: string;
-  queue: string;
-  group?: string;
-  state: 'waiting' | 'active' | 'completed' | 'failed';
-  createdAt: string;
-  data?: any;
-  metadata?: {
-    attempts?: number;
-  };
-  options?: TaskOptions;
-}
+export type TaskState = 'waiting' | 'active' | 'completed' | 'failed' | 'delayed' | 'paused';
 
 export interface TaskOptions {
   queue?: string;
   group?: string;
   priority?: number;
-  delay?: number;
-  attempts?: number;
+  weight?: number;
+  timeout?: number;
+  maxRetries?: number;
   backoff?: {
-    type: string;
+    type: 'fixed' | 'exponential';
     delay: number;
   };
+  removeOnComplete?: boolean | { age: number; count: number };
+  rateLimit?: {
+    max: number;
+    duration: number;
+  };
+}
+
+export interface Task {
+  id: string;
+  name: string;
+  queue: string;
+  group?: string;
+  state: TaskState;
+  createdAt: string;
+  startedAt?: string;
+  completedAt?: string;
+  failedAt?: string;
+  data: any;
+  result?: any;
+  error?: {
+    message: string;
+    stack?: string;
+  };
+  options: TaskOptions;
+  progress?: number;
+  attempts?: number;
 }
 
 export interface QueueMetrics {
@@ -35,12 +50,58 @@ export interface QueueMetrics {
   timestamp: number;
 }
 
-export interface GroupStats {
+export interface GroupMetrics {
   total: number;
   active: number;
   completed: number;
   failed: number;
-  paused: number;
+  waiting: number;
+  avgProcessingTime: number;
+  timestamp: number;
+}
+
+export interface GroupConfig {
+  strategy: 'fifo' | 'lifo' | 'priority' | 'round-robin';
+  concurrency: number;
+  maxConcurrency: number;
+  priority: number;
+  weight: number;
+  rateLimit: {
+    max: number;
+    duration: number;
+  };
+}
+
+export interface WorkerMetrics {
+  active: number;
+  completed: number;
+  failed: number;
+  uptime: number;
+  memory: {
+    heapUsed: number;
+    heapTotal: number;
+    external: number;
+  };
+  cpu: {
+    user: number;
+    system: number;
+  };
+  timestamp: number;
+}
+
+export interface Worker {
+  id: string;
+  queue: string;
+  status: 'active' | 'idle' | 'paused' | 'stopped';
+  metrics: WorkerMetrics;
+  lastHeartbeat: number;
+}
+
+export interface Group {
+  name: string;
+  metrics: GroupMetrics;
+  config: GroupConfig;
+  tasks: Task[];
 }
 
 // API Response Types
@@ -118,24 +179,6 @@ export interface TaskHistoryEntry {
   status: string;
   duration: number;
   error?: any;
-}
-
-export interface WorkerMetrics {
-  tasksProcessed: number;
-  tasksSucceeded: number;
-  tasksFailed: number;
-  averageProcessingTime: number;
-}
-
-export interface Worker {
-  id: string;
-  queue: string;
-  status: string;
-  activeTasks: any[];
-  metrics: WorkerMetrics;
-  lastHeartbeat: string;
-  isActive: boolean;
-  history?: TaskHistoryEntry[];
 }
 
 export interface WorkersResponse {

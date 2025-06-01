@@ -42,17 +42,17 @@ const columns: ColumnDef<Task>[] = [
 ];
 
 export default function GroupsPage() {
-  const { data: groupsData, error: groupsError } = useGroups();
+  const { data: groupsData, error: groupsError, isLoading: groupsLoading } = useGroups();
   const [selectedGroup, setSelectedGroup] = useState<string>("");
-  const { data: tasksData, error: tasksError } = useGroupTasks(selectedGroup);
-  const { data: statsData, error: statsError } = useGroupStats(selectedGroup);
+  const { data: tasksData, error: tasksError, isLoading: tasksLoading } = useGroupTasks(selectedGroup);
+  const { data: statsData, error: statsError, isLoading: statsLoading } = useGroupStats(selectedGroup);
 
-  if (groupsError) {
-    return <div>Error loading groups</div>;
+  if (groupsLoading || tasksLoading || statsLoading) {
+    return <div>Loading...</div>;
   }
 
-  if (!groupsData) {
-    return <div>Loading...</div>;
+  if (!groupsData || !tasksData || !statsData) {
+    return <div>No data</div>;
   }
 
   return (

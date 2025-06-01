@@ -127,7 +127,11 @@ const columns: ColumnDef<Worker>[] = [
 ];
 
 export default function WorkersPage() {
-  const { data: workersData, error } = useWorkers();
+  const { data: workersData, error, isLoading } = useWorkers();
+
+  if (isLoading) {
+    return <div>Loading...</div>;
+  }
 
   if (error) {
     return (
@@ -140,23 +144,9 @@ export default function WorkersPage() {
   }
 
   if (!workersData) {
-    return (
-      <div className="container mx-auto py-10 flex items-center justify-center">
-        <Loader2 className="h-8 w-8 animate-spin" />
-      </div>
-    );
+    return <div>No data</div>;
   }
 
-  const totalTasks = workersData.workers.reduce(
-    (sum, worker) => sum + worker.metrics.tasksProcessed,
-    0
-  );
-
-  const avgProcessingTime =
-    workersData.workers.reduce(
-      (sum, worker) => sum + worker.metrics.averageProcessingTime,
-      0
-    ) / workersData.workers.length || 0;
   const activeWorkers = workersData.workers.filter(
     (worker) => worker.status === "active"
   ).length;
@@ -173,24 +163,6 @@ export default function WorkersPage() {
           <CardContent>
             <div className="text-2xl font-bold">
               {activeWorkers} / {workersData.workers.length}
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader>
-            <CardTitle>Total Tasks Processed</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{totalTasks}</div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader>
-            <CardTitle>Avg. Processing Time</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">
-              {Math.round(avgProcessingTime)} ms
             </div>
           </CardContent>
         </Card>

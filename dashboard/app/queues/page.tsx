@@ -93,8 +93,8 @@ const columns: ColumnDef<Task>[] = [
 ];
 
 export default function QueuesPage() {
-  const { data: queuesData, error: queuesError } = useQueues();
-  const { data: metricsData, error: metricsError } = useQueueMetrics();
+  const { data: queuesData, error: queuesError, isLoading: queuesLoading } = useQueues();
+  const { data: metricsData, error: metricsError, isLoading: metricsLoading } = useQueueMetrics();
   const router = useRouter();
 
   if (queuesError || metricsError) {
@@ -102,13 +102,17 @@ export default function QueuesPage() {
     return <div>Error loading data</div>;
   }
 
-  if (!queuesData || !metricsData) {
+  if (queuesLoading || metricsLoading) {
     console.log("Loading data...");
     return (
       <div className="container mx-auto py-10 flex items-center justify-center">
         <Loader2 className="h-8 w-8 animate-spin" />
       </div>
     );
+  }
+
+  if (!queuesData || !metricsData) {
+    return <div>No data</div>;
   }
 
   return (
