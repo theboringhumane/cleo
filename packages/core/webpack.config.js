@@ -1,4 +1,7 @@
 const path = require("path");
+const TerserPlugin = require("terser-webpack-plugin");
+
+const isProduction = process.env.NODE_ENV === "production";
 
 module.exports = {
   entry: {
@@ -6,6 +9,19 @@ module.exports = {
   },
   target: "node",
   mode: process.env.NODE_ENV || "development",
+  optimization: {
+    minimize: isProduction,
+    minimizer: [
+      new TerserPlugin({
+        terserOptions: {
+          compress: {
+            drop_console: true,
+          },
+          mangle: true,
+        },
+      }),
+    ],
+  },
   module: {
     rules: [
       {
@@ -16,6 +32,11 @@ module.exports = {
             configFile: path.resolve(__dirname, "tsconfig.json"),
             // Ensure webpack respects tsconfig paths
             transpileOnly: false,
+            // Generate declaration files
+            compilerOptions: {
+              declaration: true,
+              declarationMap: true,
+            },
           },
         },
         exclude: [/node_modules/, /examples/, /logs/],

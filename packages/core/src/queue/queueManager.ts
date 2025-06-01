@@ -56,7 +56,7 @@ export class QueueManager {
     this.metrics = new QueueMetrics(this.redis);
 
     const finalQueueOptions: QueueOptions = {
-      connection: this.redis,
+      connection: this.redis.options,
       ...queueOptions,
     };
 
@@ -174,7 +174,9 @@ export class QueueManager {
     });
 
     queueEvents.on("completed", async ({ jobId, returnvalue }) => {
-      await this.updateQueueMetadata(queueName);
+      await this.updateQueueMetadata(queueName, {
+        lastActivity: Date.now(),
+      });
       logger.info("✅ QueueManager: Job completed", {
         file: "queueManager.ts",
         function: "queueEvents",
@@ -368,7 +370,7 @@ export class QueueManager {
 
     if (!queue) {
       this.initializeQueue(queueName, {
-        connection: this.redis,
+        connection: this.redis.options,
       });
       queue = this.queues.get(queueName);
     }
@@ -414,6 +416,8 @@ export class QueueManager {
       TaskStatus.WAITING,
       task
     );
+
+    await this.updateQueueMetadata(queueName);
 
     logger.debug("🔄 QueueManager: Task added to queue", {
       file: "queueManager.ts",
