@@ -10,14 +10,17 @@ A distributed task queue system that's seriously powerful (but doesn't take itse
 ## Docs
 
 - [Cleo Docs](https://cleo.theboring.name)
+- [Task History Documentation](docs/TASK_HISTORY.md)
 
 ## Features ✨
 
 - **Task Grouping** 🎯 - Because some tasks are more social than others
-- **Distributed Locking** 🔐 - No queue jumping allowed!
+- **Distributed Locking** 🔐 - No queue jumping allowed! (Enhanced with GroupLock)
 - **Retry with Backoff** 🔄 - If at first you don't succeed... we got you covered
 - **Redis-Backed** 📦 - Because memory is fleeting, but Redis is forever
 - **TypeScript Support** 💪 - For when `any` just won't cut it
+- **Centralized Task History** 📊 - Track everything with comprehensive analytics
+- **Enhanced Error Handling** 🛡️ - Robust authentication and connection management
 
 ### Core Superpowers 💫
 
@@ -29,6 +32,28 @@ A distributed task queue system that's seriously powerful (but doesn't take itse
 - ⚡ Event-driven architecture (Redis pub/sub magic)
 - 🛡️ Built-in error handling (because stuff happens)
 - 📈 Performance metrics (for the data nerds)
+- 🔒 Enhanced locking with GroupLock (prevents race conditions)
+
+#### Task History & Analytics 📊
+- 📝 **Centralized History Management**
+  - Worker-specific task history
+  - Task-specific tracking across workers
+  - Queue-level analytics
+  - Group-based monitoring
+  - Global system overview
+
+- 📈 **Rich Analytics**
+  - Success/failure rates
+  - Processing duration statistics
+  - Performance trends over time
+  - Resource utilization metrics
+  - Error pattern analysis
+
+- 🔍 **Multi-dimensional Querying**
+  - Filter by worker, task, queue, or group
+  - Time-based analysis
+  - Performance bottleneck identification
+  - Historical trend analysis
 
 #### Group Processing Strategies 🎲
 - 🔄 **Round Robin**: Fair play for all tasks
@@ -48,11 +73,19 @@ A distributed task queue system that's seriously powerful (but doesn't take itse
   - Resource usage metrics (watching the diet)
   - Performance insights (big brain time)
 
+- 🔐 **Enhanced Security & Reliability**
+  - Robust Redis authentication handling
+  - Connection resilience with automatic retry
+  - Comprehensive error logging and recovery
+  - Race condition prevention with GroupLock
+
 #### Security & Protection 🛡️
 - 🔐 Redis ACL support (because sharing isn't always caring)
 - 🎯 Task-level permissions (not everyone gets a backstage pass)
 - 📝 Audit logging (tracking who did what)
 - 🔑 Role-based access (VIP list management)
+- 🛡️ Enhanced authentication error handling
+- 🔒 Distributed locking with GroupLock for safe concurrent operations
 
 ## System Architecture 🏗️
 (Where all the magic happens ✨)
@@ -63,8 +96,11 @@ graph TB
     QM --> Redis[(💾 Redis)]
     QM --> Worker[👷 Worker Pool]
     QM --> Groups[👥 Task Groups]
+    QM --> History[📊 Task History Service]
     Worker --> Redis
     Groups --> Redis
+    Groups --> Lock[🔒 GroupLock]
+    History --> Redis
     
     subgraph "🎭 Task Party"
         Groups --> Strategy{🎯 Strategy}
@@ -78,6 +114,14 @@ graph TB
         Worker --> W2[🏃‍♀️ Worker 2]
         Worker --> W3[🏃‍♂️ Worker 3]
     end
+
+    subgraph "📊 Analytics Hub"
+        History --> WH[👷 Worker History]
+        History --> TH[📋 Task History]
+        History --> QH[🎯 Queue History]
+        History --> GH[👥 Group History]
+        History --> GL[🌍 Global History]
+    end
 ```
 
 ## Task Flow 🌊
@@ -88,16 +132,23 @@ sequenceDiagram
     participant C as 🖥️ Client
     participant QM as 📊 Queue
     participant G as 👥 Group
+    participant L as 🔒 GroupLock
     participant W as 👷 Worker
+    participant H as 📊 History
     participant R as 💾 Redis
 
     C->>QM: Submit Task 📬
     QM->>G: Group Check 🔍
+    G->>L: Acquire Lock 🔒
+    L-->>G: Lock Granted ✅
     G->>R: Store State 💾
     QM->>R: Queue Task ➡️
     W->>R: Poll Tasks 🎣
     W->>G: Check Order 📋
     W->>QM: Process ⚙️
+    W->>H: Log History 📝
+    H->>R: Store Analytics 📊
+    G->>L: Release Lock 🔓
     QM->>C: Done! 🎉
 ```
 
@@ -124,47 +175,51 @@ graph TD
     
     %% Task Addition Flow
     B --> C[TaskGroup.addTask]
-    C --> D{Store in Redis}
-    D --> |Add to group set| E[groupKey]
-    D --> |Set priority score| F[processingOrderKey]
-    D --> |Set initial status| G[stateKey: WAITING]
-    D --> |Store task details| H[groupKey:tasks:taskId]
+    C --> D{GroupLock.acquireLock}
+    D --> |Lock acquired| E[Store in Redis]
+    E --> |Add to group set| F[groupKey]
+    E --> |Set priority score| G[processingOrderKey]
+    E --> |Set initial status| H[stateKey: WAITING]
+    E --> |Store task details| I[groupKey:tasks:taskId]
+    E --> J[GroupLock.releaseLock]
 
     %% Processing Flow
-    I[QueueManager.processGroupTasks] --> J[TaskGroup.processNextTask]
-    J --> K[TaskGroup.getNextTask]
-    K --> |Strategy based selection| L{Select by Strategy}
-    L --> |FIFO| M[zrange 0,0]
-    L --> |LIFO| N[zrange -1,-1]
-    L --> |Priority| O[zrevrange 0,0]
+    K[QueueManager.processGroupTasks] --> L[TaskGroup.processNextTask]
+    L --> M[TaskGroup.getNextTask]
+    M --> |Strategy based selection| N{Select by Strategy}
+    N --> |FIFO| O[zrange 0,0]
+    N --> |LIFO| P[zrange -1,-1]
+    N --> |Priority| Q[zrevrange 0,0]
     
     %% Task Processing
-    J --> P[Update task status: ACTIVE]
-    P --> Q[QueueManager.ensureTaskInQueue]
-    Q --> R[Queue.add]
+    L --> R[Update task status: ACTIVE]
+    R --> S[QueueManager.ensureTaskInQueue]
+    S --> T[Queue.add]
     
     %% Worker Processing
-    S[Worker.JobProcessor] --> T{Check Group Task}
-    T --> |Yes| U[TaskGroup.getNextTask]
-    U --> V{Can Process?}
-    V --> |Yes| W[Process Task]
-    V --> |No| X[Move to Delayed]
+    U[Worker.JobProcessor] --> V{Check Group Task}
+    V --> |Yes| W[TaskGroup.getNextTask]
+    W --> X{Can Process?}
+    X --> |Yes| Y[Process Task]
+    X --> |No| Z[Move to Delayed]
     
-    %% Task Completion
-    W --> Y[TaskGroup.completeTask]
-    Y --> Z[Update Stats]
-    Y --> AA[Clean up task data]
+    %% Task Completion & History
+    Y --> AA[TaskGroup.completeTask]
+    AA --> BB[TaskHistoryService.addTaskHistory]
+    BB --> CC[Update Stats]
+    AA --> DD[Clean up task data]
     
     %% Error Handling
-    W --> |Error| BB[TaskGroup.failTask]
-    BB --> CC{Retry?}
-    CC --> |Yes| DD[Add back to processing order]
-    CC --> |No| EE[Move to Dead Letter Queue]
+    Y --> |Error| EE[TaskGroup.failTask]
+    EE --> FF{Retry?}
+    FF --> |Yes| GG[Add back to processing order]
+    FF --> |No| HH[Move to Dead Letter Queue]
+    EE --> II[TaskHistoryService.addTaskHistory]
 
     %% Health Check
-    FF[QueueManager.startHealthCheck] --> GG[TaskGroup.recoverStuckTasks]
-    GG --> HH[Check processing duration]
-    HH --> |Exceeded timeout| BB
+    JJ[QueueManager.startHealthCheck] --> KK[TaskGroup.recoverStuckTasks]
+    KK --> LL[Check processing duration]
+    LL --> |Exceeded timeout| EE
 ```
 
 ## Installation 🛠️
@@ -192,7 +247,7 @@ cleo.configure({
   redis: {
     host: "localhost",
     port: 6379,
-    password: "cleosecret",
+    password: "cleosecret", // Enhanced auth handling!
   },
   worker: {
     concurrency: 4,
@@ -273,9 +328,40 @@ queueManager.setGroupProcessingStrategy(GroupProcessingStrategy.PRIORITY);
 await queueManager.setGroupPriority("notifications", 10);
 ```
 
+### Task History & Analytics 📊
+```typescript
+import { TaskHistoryService } from "@cleo/core";
+
+// Get the task history service
+const historyService = TaskHistoryService.getInstance();
+
+// Get worker-specific history
+const workerHistory = await historyService.getWorkerHistory("worker-123", 50);
+
+// Get task-specific history across all workers
+const taskHistory = await historyService.getTaskHistory("task-456", 25);
+
+// Get queue analytics
+const queueHistory = await historyService.getQueueHistory("email-queue", 100);
+
+// Get group performance
+const groupHistory = await historyService.getGroupHistory("notifications", 75);
+
+// Get global system stats
+const globalHistory = await historyService.getGlobalHistory(200);
+const stats = await historyService.getHistoryStats();
+
+console.log("System Performance:", {
+  totalTasks: stats.totalTasks,
+  successRate: (stats.completedTasks / stats.totalTasks) * 100,
+  averageDuration: stats.averageDuration,
+  failureRate: (stats.failedTasks / stats.totalTasks) * 100,
+});
+```
+
 ### Error Handling & Retries 🛟
 ```typescript
-// Built-in retry configuration
+// Built-in retry configuration with enhanced error handling
 @QueueClass({
   defaultOptions: {
     maxRetries: 3,
@@ -289,6 +375,7 @@ await queueManager.setGroupPriority("notifications", 10);
 class ReliableService {
   async mightFail() {
     // Will retry 3 times with backoff
+    // Enhanced error logging and history tracking
     throw new Error("Oops!");
   }
 }
@@ -332,6 +419,7 @@ queueManager.onTaskEvent(ObserverEvent.TASK_FAILED, (taskId, status, error) => {
 Check out our example files for full implementations:
 - [Basic Usage](packages/core/examples/basic.ts) - Simple task processing with monitoring
 - [Advanced Features](packages/core/examples/advanced.ts) - Group processing, strategies, and error handling
+- [Task History Examples](examples/taskHistoryExample.ts) - Comprehensive analytics and monitoring
 
 Each example comes with:
 - 🎯 Complete setup and configuration
@@ -339,6 +427,28 @@ Each example comes with:
 - 🎭 Different processing strategies
 - 🛠️ Error handling patterns
 - 📈 Performance monitoring
+- 📊 Task history and analytics
+
+## New Features & Improvements 🆕
+
+### Enhanced Task History System 📊
+- **Centralized Management**: Single `TaskHistoryService` for all history operations
+- **Multi-dimensional Storage**: Track by worker, task, queue, group, and globally
+- **Automatic Cleanup**: Built-in expiration and list trimming to prevent memory bloat
+- **Rich Analytics**: Comprehensive statistics and performance metrics
+- **Easy Integration**: Seamless integration with existing Worker and QueueManager classes
+
+### Improved Group Locking 🔒
+- **GroupLock Integration**: Replaced simple Redis locking with robust `GroupLock` implementation
+- **Race Condition Prevention**: Safe concurrent operations across distributed workers
+- **Enhanced Error Handling**: Comprehensive logging and error recovery
+- **Lock Management**: Automatic cleanup and timeout handling
+
+### Better Error Handling 🛡️
+- **Redis Authentication**: Enhanced handling of `NOAUTH` and `WRONGPASS` errors
+- **Connection Resilience**: Automatic retry and recovery mechanisms
+- **Comprehensive Logging**: Detailed error tracking and debugging information
+- **Graceful Degradation**: System continues operating even with partial failures
 
 ## Contributing 🤝
 
@@ -358,8 +468,10 @@ Check out our [Contributing Guidelines](CONTRIBUTING.md) for:
 
 Our project is like a well-oiled machine (that occasionally needs coffee):
 - **QueueManager** 📊 - The traffic controller of your tasks
-- **TaskGroup** 👥 - Because tasks work better in teams
+- **TaskGroup** 👥 - Because tasks work better in teams (now with GroupLock!)
 - **Worker** 🏃 - The real MVP doing all the heavy lifting
+- **TaskHistoryService** 📊 - Your analytics powerhouse
+- **GroupLock** 🔒 - Keeping your concurrent operations safe
 - **Utilities** 🛠️ - Our Swiss Army knife of helper functions
 
 ## Performance Features ⚡
@@ -370,18 +482,37 @@ graph LR
     A[📊 Smart Batching] --> B[⚡ Fast Processing]
     B --> C[🎯 Optimal Results]
     C --> D[🎉 Happy Users]
+    E[🔒 GroupLock] --> F[🛡️ Safe Concurrency]
+    F --> G[📈 Reliable Performance]
+    H[📊 Task History] --> I[🔍 Deep Insights]
+    I --> J[⚡ Performance Optimization]
     
     style A fill:#f96,stroke:#333
     style B fill:#9cf,stroke:#333
     style C fill:#9f9,stroke:#333
     style D fill:#f9f,stroke:#333
+    style E fill:#ff9,stroke:#333
+    style F fill:#9ff,stroke:#333
+    style G fill:#f9f,stroke:#333
+    style H fill:#9f9,stroke:#333
+    style I fill:#ff9,stroke:#333
+    style J fill:#9cf,stroke:#333
 ```
+
+## Documentation 📚
+
+- [Task History Service](docs/TASK_HISTORY.md) - Comprehensive analytics and monitoring
+- [Group Processing](docs/GROUP_PROCESSING.md) - Advanced task grouping strategies
+- [Error Handling](docs/ERROR_HANDLING.md) - Robust error management
+- [Performance Tuning](docs/PERFORMANCE.md) - Optimization best practices
 
 ## License 📜
 
 MIT License - see LICENSE file for details
 
-> Remember: In a world of callbacks, promises, and async/await, we're all just trying our best to avoid race conditions! 🏁
+> Remember: In a world of callbacks, promises, and async/await, we're all just trying our best to avoid race conditions! 🏁 (Good thing we have GroupLock now! 🔒)
 
 ---
 Made with ❤️ and probably too much caffeine ☕
+
+*Now with 100% more task history and 0% more race conditions!* 🎉
