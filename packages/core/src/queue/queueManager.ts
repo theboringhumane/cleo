@@ -24,12 +24,6 @@ import {
   QUEUE_WORKERS_PREFIX,
 } from "../constants";
 
-interface GroupInfo {
-  name: string;
-  priority: number;
-  lastProcessed?: number;
-}
-
 export type WorkerType = Worker;
 export type WorkerMap = Map<string, WorkerType>;
 
@@ -381,7 +375,7 @@ export class QueueManager {
     }
 
     const task: Task = {
-      id: options.id || `${name}-${generateUUID()}`,
+      id: options.id ?? `${name}-${generateUUID()}`,
       name,
       data,
       options,
@@ -392,6 +386,7 @@ export class QueueManager {
     };
 
     const jobOptions = {
+      id: task.id,
       priority: options.priority,
       attempts: options.maxRetries,
       backoff: {
@@ -400,17 +395,19 @@ export class QueueManager {
       },
       timeout: options.timeout || 300000, // 5 minutes
       removeOnComplete: options.removeOnComplete || false,
-      repeat: options.schedule
-        ? {
-            pattern: options.schedule.pattern,
-          }
-        : undefined,
+      repeat: options.schedule,
       jobId: task.id,
     };
 
     data.options = jobOptions;
 
-    const job = await queue!.add(name, data, jobOptions);
+    const job = jobOptions.repeat?.pattern
+      ? await queue!.upsertJobScheduler(jobOptions.id, jobOptions.repeat, {
+          name,
+          data,
+          opts: jobOptions,
+        })
+      : await queue!.add(name, data, jobOptions);
 
     this.observer.notify(
       ObserverEvent.TASK_ADDED,
@@ -496,7 +493,12 @@ export class QueueManager {
     const job = await queue.getJob(taskId);
     if (!job) return false;
 
-    await job.remove();
+    if (job.opts.repeat) {
+      await queue.removeJobScheduler(job.id);
+    } else {
+      await job.remove();
+    }
+
     return true;
   }
 
@@ -511,7 +513,7 @@ export class QueueManager {
   // Simplified group methods
   async getGroup(groupName: string): Promise<TaskGroup> {
     let group = this.groups.get(groupName);
-    
+
     if (!group) {
       const config: GroupConfig = {
         name: groupName,
@@ -715,12 +717,12 @@ export class QueueManager {
   }
 
   private async getGroupPriority(groupName: string): Promise<number> {
-    const priority = await this.redis.hget('group:priorities', groupName);
+    const priority = await this.redis.hget("group:priorities", groupName);
     return priority ? parseInt(priority) : 0;
   }
 
   async setGroupPriority(groupName: string, priority: number): Promise<void> {
-    await this.redis.hset('group:priorities', groupName, priority.toString());
+    await this.redis.hset("group:priorities", groupName, priority.toString());
     const group = await this.getGroup(groupName);
     await group.updateConfig({ priority });
   }
