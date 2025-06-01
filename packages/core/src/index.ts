@@ -162,6 +162,9 @@ export {
 // Export the worker
 export { Worker } from "./workers";
 
+// Export the task history service
+export { TaskHistoryService, type ExtendedTaskHistoryEntry } from "./services/taskHistory";
+
 /**
  * Example usage:
  *
