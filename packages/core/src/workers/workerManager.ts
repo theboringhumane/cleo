@@ -1,15 +1,18 @@
-import { RedisInstance } from "../config/redis";
-
-import Redis from "ioredis";
-import { redisConnection } from "../config/redis";
-import { QUEUE_WORKERS_PREFIX, QUEUES_SET_KEY, WORKER_KEY, WORKERS_SET_KEY } from "../constants";
+import { Redis } from "ioredis";
+import { redisConnection, RedisInstance } from "../config/redis";
+import { QUEUE_WORKERS_PREFIX, QUEUES_SET_KEY, WORKER_KEY, WORKERS_SET_KEY, TASK_HISTORY_KEY } from "../constants";
 import { TaskHistoryEntry, WorkerMetrics } from "../types/interfaces";
+import { TaskHistoryService } from "../services/taskHistory";
+import { logger } from "../utils/logger";
 
 export class WorkerManager {
   private static instance: WorkerManager;
   private redis: Redis;
+  private taskHistoryService: TaskHistoryService;
+
   private constructor(instanceId: RedisInstance = RedisInstance.DEFAULT) {
     this.redis = redisConnection.getInstance(instanceId);
+    this.taskHistoryService = TaskHistoryService.getInstance();
   }
 
   public static getInstance(
@@ -53,9 +56,80 @@ export class WorkerManager {
     return lastHeartbeat || "unknown";
   }
 
-  public async getTaskHistory(workerId: string): Promise<TaskHistoryEntry[]> {
-    const taskHistory = await this.redis.lrange(`${WORKER_KEY}:${workerId}:taskHistory`, 0, -1);
-    return taskHistory.map((entry: string) => JSON.parse(entry));
+  /**
+   * Get task history for a specific worker
+   */
+  async getTaskHistory(workerId: string, limit: number = 100): Promise<any[]> {
+    try {
+      return await this.taskHistoryService.getWorkerHistory(workerId, limit);
+    } catch (error) {
+      logger.error("❌ WorkerManager: Failed to get task history", {
+        file: "workerManager.ts",
+        function: "getTaskHistory",
+        workerId,
+        error,
+      });
+      return [];
+    }
+  }
+
+  /**
+   * Get task history for a specific task across all workers
+   */
+  async getTaskHistoryById(taskId: string, limit: number = 50): Promise<any[]> {
+    try {
+      return await this.taskHistoryService.getTaskHistory(taskId, limit);
+    } catch (error) {
+      logger.error("❌ WorkerManager: Failed to get task history by ID", {
+        file: "workerManager.ts",
+        function: "getTaskHistoryById",
+        taskId,
+        error,
+      });
+      return [];
+    }
+  }
+
+  /**
+   * Get global task history across all workers
+   */
+  async getGlobalTaskHistory(limit: number = 100): Promise<any[]> {
+    try {
+      return await this.taskHistoryService.getGlobalHistory(limit);
+    } catch (error) {
+      logger.error("❌ WorkerManager: Failed to get global task history", {
+        file: "workerManager.ts",
+        function: "getGlobalTaskHistory",
+        error,
+      });
+      return [];
+    }
+  }
+
+  /**
+   * Get task history statistics
+   */
+  async getTaskHistoryStats(): Promise<{
+    totalTasks: number;
+    completedTasks: number;
+    failedTasks: number;
+    averageDuration: number;
+  }> {
+    try {
+      return await this.taskHistoryService.getHistoryStats();
+    } catch (error) {
+      logger.error("❌ WorkerManager: Failed to get task history stats", {
+        file: "workerManager.ts",
+        function: "getTaskHistoryStats",
+        error,
+      });
+      return {
+        totalTasks: 0,
+        completedTasks: 0,
+        failedTasks: 0,
+        averageDuration: 0,
+      };
+    }
   }
 
   public async getMetricsHistory(workerId: string): Promise<WorkerMetrics[]> {

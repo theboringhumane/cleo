@@ -1,17 +1,23 @@
 import { Worker as BullWorker, Job } from "bullmq";
+import { redisConnection } from "../config/redis";
 import {
+  TaskHistoryEntry,
   WorkerConfig,
   WorkerMetrics,
-  TaskHistoryEntry,
 } from "../types/interfaces";
-import { redisConnection } from "../config/redis";
 import { ObserverEvent, TaskStatus } from "../types/enums";
 import { TaskObserver } from "../observers/taskObserver";
 import { logger } from "../utils/logger";
+import {
+  WORKERS_SET_KEY,
+  WORKER_KEY,
+  TASK_HISTORY_KEY,
+  TASK_HISTORY_EXPIRE,
+} from "../constants";
 import { QueueManager } from "../queue/queueManager";
-import { Redis } from "ioredis";
-import { WORKERS_SET_KEY, WORKER_KEY } from "../constants";
+import type { Redis } from "ioredis";
 import { MonkeyCapture } from "../decorators/monkeyLog";
+import { TaskHistoryService } from "../services/taskHistory";
 
 export class Worker extends BullWorker {
   private registeredTasks: Map<string, Function> = new Map();
@@ -26,6 +32,7 @@ export class Worker extends BullWorker {
   private lastHeartbeatKey: string;
   private taskHistoryKey: string;
   public workersKey: string;
+  private taskHistoryService: TaskHistoryService;
 
   constructor(
     queueName: string,
@@ -60,7 +67,7 @@ export class Worker extends BullWorker {
     this.activeTasksKey = `${WORKER_KEY}:${this._workerId}:activeTasks`;
     this.statusKey = `${WORKER_KEY}:${this._workerId}:status`;
     this.lastHeartbeatKey = `${WORKER_KEY}:${this._workerId}:lastHeartbeat`;
-    this.taskHistoryKey = `${WORKER_KEY}:${this._workerId}:task:history`;
+    this.taskHistoryKey = `${TASK_HISTORY_KEY}${this._workerId}`;
 
     // Initialize workers in Redis
     this.initializeWorkers();
@@ -70,6 +77,16 @@ export class Worker extends BullWorker {
 
     // Start heartbeat
     this.startHeartbeat();
+
+    this.taskHistoryService = TaskHistoryService.getInstance();
+
+    logger.info("🔧 Worker: initialized", {
+      file: "worker.ts",
+      function: "constructor",
+      workerId: this._workerId,
+      queueName: this._queueName,
+      taskHistoryKey: this.taskHistoryKey,
+    });
   }
 
   private async JobProcessor(job: Job): Promise<any> {
@@ -286,22 +303,68 @@ export class Worker extends BullWorker {
     error?: any,
     group?: string
   ): Promise<void> {
-    const entry: TaskHistoryEntry = {
-      taskId,
-      timestamp: new Date().toISOString(),
-      status,
-      duration,
-      error,
-      group,
-    };
-
-    await this.redis.lpush(this.taskHistoryKey, JSON.stringify(entry));
-    await this.redis.ltrim(this.taskHistoryKey, 0, 99); // Keep last 100 entries
+    try {
+      await this.taskHistoryService.addTaskHistory(
+        taskId,
+        status,
+        duration,
+        this._workerId,
+        this._queueName,
+        error,
+        group
+      );
+    } catch (error) {
+      logger.error("❌ Worker: Failed to add task history", {
+        file: "index.ts",
+        function: "addTaskHistory",
+        workerId: this._workerId,
+        taskId,
+        error,
+      });
+    }
   }
 
-  async getTaskHistory(): Promise<TaskHistoryEntry[]> {
-    const history = await this.redis.lrange(this.taskHistoryKey, 0, -1);
-    return history.map((entry) => JSON.parse(entry));
+  async getTaskHistory(limit: number = 100): Promise<any[]> {
+    try {
+      return await this.taskHistoryService.getWorkerHistory(this._workerId, limit);
+    } catch (error) {
+      logger.error("❌ Worker: Failed to get task history", {
+        file: "index.ts",
+        function: "getTaskHistory",
+        workerId: this._workerId,
+        error,
+      });
+      return [];
+    }
+  }
+
+  async getTaskHistoryById(taskId: string, limit: number = 50): Promise<any[]> {
+    try {
+      return await this.taskHistoryService.getTaskHistory(taskId, limit);
+    } catch (error) {
+      logger.error("❌ Worker: Failed to get task history by ID", {
+        file: "index.ts",
+        function: "getTaskHistoryById",
+        workerId: this._workerId,
+        taskId,
+        error,
+      });
+      return [];
+    }
+  }
+
+  async getGlobalTaskHistory(limit: number = 100): Promise<any[]> {
+    try {
+      return await this.taskHistoryService.getGlobalHistory(limit);
+    } catch (error) {
+      logger.error("❌ Worker: Failed to get global task history", {
+        file: "index.ts",
+        function: "getGlobalTaskHistory",
+        workerId: this._workerId,
+        error,
+      });
+      return [];
+    }
   }
 
   private async getAverageProcessingTime(): Promise<number> {
