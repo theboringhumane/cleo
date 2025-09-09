@@ -21,7 +21,8 @@
     "start": "node dist/server.js",
     "clean": "rimraf dist coverage",
     "example:basic": "ts-node examples/basic.ts",
-    "example:advanced": "ts-node examples/advanced.ts"  },
+    "example:advanced": "ts-node examples/advanced.ts"
+  },
   "keywords": [
     "task-queue",
     "celery",
@@ -33,7 +34,7 @@
   "author": "",
   "license": "MIT",
   "dependencies": {
-    "bullmq": "5.53.1",
+    "bullmq": "latest",
     "ioredis": "latest",
     "pino": "latest",
     "pino-pretty": "latest",

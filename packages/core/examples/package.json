@@ -1,0 +1,17 @@
+{
+  "name": "cleo-examples",
+  "version": "1.0.0",
+  "description": "Examples for Cleo client-server setup",
+  "scripts": {
+    "dev:client": "bun run nextjs-client-example.ts",
+    "dev:worker": "bun run bun-worker-example.ts",
+    "start:worker": "bun run --watch bun-worker-example.ts"
+  },
+  "dependencies": {
+    "cleo-core": "file:../",
+    "bun-types": "latest"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0"
+  }
+}

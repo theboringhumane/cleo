@@ -11,17 +11,17 @@ export interface ExtendedTaskHistoryEntry extends TaskHistoryEntry {
 
 export class TaskHistoryService {
   private redis: Redis;
-  private static instance: TaskHistoryService;
+  private static instances: Map<string, TaskHistoryService> = new Map();
 
   private constructor(instanceId: RedisInstance = RedisInstance.DEFAULT) {
     this.redis = redisConnection.getInstance(instanceId);
   }
 
   static getInstance(instanceId: RedisInstance = RedisInstance.DEFAULT): TaskHistoryService {
-    if (!TaskHistoryService.instance) {
-      TaskHistoryService.instance = new TaskHistoryService(instanceId);
+    if (!TaskHistoryService.instances.has(instanceId)) {
+      TaskHistoryService.instances.set(instanceId, new TaskHistoryService(instanceId));
     }
-    return TaskHistoryService.instance;
+    return TaskHistoryService.instances.get(instanceId)!;
   }
 
   /**

@@ -37,6 +37,7 @@ export class QueueManager {
   public deadLetterQueue: DeadLetterQueue;
   private metrics: QueueMetrics;
   private healthCheckInterval: NodeJS.Timeout | null = null;
+  private shouldCreateWorkers: boolean = true;
 
   // Redis keys for queue tracking
   private readonly QUEUES_SET_KEY = QUEUES_SET_KEY;
@@ -47,13 +48,15 @@ export class QueueManager {
     defaultQueueName: string = "default",
     redisInstance: RedisInstance = RedisInstance.DEFAULT,
     queueOptions: Partial<QueueOptions> = {},
-    workerOptions: WorkerConfig = {}
+    workerOptions: WorkerConfig = {},
+    createWorkers: boolean = true
   ) {
     this.instanceId = redisInstance;
     this.redis = redisConnection.getInstance(this.instanceId);
     this.queues = new Map();
     this.queueEvents = new Map();
     this.metrics = new QueueMetrics(this.redis);
+    this.shouldCreateWorkers = createWorkers;
 
     const finalQueueOptions: QueueOptions = {
       connection: this.redis.options,
@@ -64,7 +67,8 @@ export class QueueManager {
       defaultQueueName,
       finalQueueOptions,
       workerOptions,
-      this.instanceId
+      this.instanceId,
+      createWorkers
     );
     this.observer = new TaskObserver(this.redis);
     this.groups = new Map();
@@ -151,7 +155,8 @@ export class QueueManager {
     queueName: string,
     queueOptions: QueueOptions,
     workerOptions: WorkerConfig = {},
-    instanceId: string = "default"
+    instanceId: string = "default",
+    createWorkers: boolean = true
   ): Promise<void> {
     // Add queue to Redis set
     await this.redis.sadd(this.QUEUES_SET_KEY, queueName);
@@ -219,7 +224,11 @@ export class QueueManager {
     });
 
     this.queueEvents.set(queueName, queueEvents);
-    this.initializeWorker(queueName, workerOptions, instanceId);
+    
+    // Only create workers if requested
+    if (createWorkers) {
+      this.initializeWorker(queueName, workerOptions, instanceId);
+    }
   }
 
   initializeWorker(
@@ -236,9 +245,10 @@ export class QueueManager {
 
   async createQueue(
     queueName: string,
-    queueOptions: QueueOptions
+    queueOptions: QueueOptions,
+    createWorkers: boolean = true
   ): Promise<Queue> {
-    await this.initializeQueue(queueName, queueOptions);
+    await this.initializeQueue(queueName, queueOptions, {}, this.instanceId, createWorkers && this.shouldCreateWorkers);
     const queue = this.queues.get(queueName);
     if (!queue) {
       throw new Error(`Failed to create queue ${queueName}`);
@@ -253,7 +263,7 @@ export class QueueManager {
       // Try to restore queue from Redis
       const config = await this.getQueueConfig(queueName);
       if (config) {
-        await this.initializeQueue(queueName, config);
+        await this.initializeQueue(queueName, config, {}, this.instanceId, this.shouldCreateWorkers);
         return this.queues.get(queueName) || null;
       }
     }
@@ -289,7 +299,12 @@ export class QueueManager {
   async getWorkerById(workerId: string): Promise<WorkerType | undefined> {
     const worker = await this.redis.sismember(WORKERS_SET_KEY, workerId);
     if (worker) {
-      return this.workers.get(workerId);
+      // Find worker by ID across all queue workers
+      for (const [queueName, queueWorker] of this.workers) {
+        if (queueWorker.workerId === workerId) {
+          return queueWorker;
+        }
+      }
     }
     return undefined;
   }
@@ -400,8 +415,6 @@ export class QueueManager {
       jobId: task.id,
     };
 
-    data.options = jobOptions;
-
     const job = jobOptions.repeat?.pattern
       ? await queue!.upsertJobScheduler(jobOptions.id, jobOptions.repeat, {
           name,
@@ -497,7 +510,7 @@ export class QueueManager {
     if (!job) return false;
 
     if (job.opts.repeat) {
-      await queue.removeJobScheduler(job.id);
+      await queue.removeJobScheduler(job.id || job.name);
     } else {
       await job.remove();
     }

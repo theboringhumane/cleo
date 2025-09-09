@@ -1,7 +1,6 @@
 import { Worker as BullWorker, Job } from "bullmq";
 import { redisConnection } from "../config/redis";
 import {
-  TaskHistoryEntry,
   WorkerConfig,
   WorkerMetrics,
 } from "../types/interfaces";
@@ -12,7 +11,6 @@ import {
   WORKERS_SET_KEY,
   WORKER_KEY,
   TASK_HISTORY_KEY,
-  TASK_HISTORY_EXPIRE,
 } from "../constants";
 import { QueueManager } from "../queue/queueManager";
 import type { Redis } from "ioredis";
@@ -78,7 +76,7 @@ export class Worker extends BullWorker {
     // Start heartbeat
     this.startHeartbeat();
 
-    this.taskHistoryService = TaskHistoryService.getInstance();
+    this.taskHistoryService = TaskHistoryService.getInstance(instanceId as any);
 
     logger.info("🔧 Worker: initialized", {
       file: "worker.ts",
@@ -111,9 +109,19 @@ export class Worker extends BullWorker {
         data: job.data.args ?? job.data,
       });
 
-      let data = job.data.args ?? job.data;
-      if (data.hasOwnProperty("data")) {
-        data = data.data;
+      // Extract the actual task data
+      let data = job.data;
+      
+      // Remove the options wrapper if it exists
+      if (data.hasOwnProperty("options")) {
+        const { options, ...taskData } = data;
+        data = taskData;
+      }
+      
+      // If there's only one property that's not options, use its value
+      const dataKeys = Object.keys(data).filter(key => key !== "options");
+      if (dataKeys.length === 1) {
+        data = data[dataKeys[0]];
       }
 
       await job.updateProgress(0);
@@ -124,9 +132,8 @@ export class Worker extends BullWorker {
           reject(new Error(`Task ${job.name} timed out after ${timeout}ms`));
         }, timeout);
       });
-
       const result = await Promise.race([
-        MonkeyCapture(handler)(...data),
+        Array.isArray(data) ? MonkeyCapture(handler)(...data) : MonkeyCapture(handler)(data),
         timeoutPromise,
       ]);
 

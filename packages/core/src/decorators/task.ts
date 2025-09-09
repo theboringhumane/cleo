@@ -1,14 +1,18 @@
 import { TaskOptions } from "../types/interfaces";
 import { logger } from "../utils/logger";
 import { ObserverEvent, TaskState, TaskStatus } from "../types/enums";
-import { redisConnection, type Cleo } from "../index";
+import { redisConnection } from "../config/redis";
 import { generateUUID } from "../utils";
-import { WorkerType } from "../queue/queueManager";
-import { retryWithBackoff } from "../utils/retryWithBackoff";
 
-let cleoInstance: Cleo | null = null;
+// Define interface for both client and worker modes
+interface CleoInstance {
+  getQueueManager(): any;
+  isClientModeEnabled?(): boolean;
+}
 
-export function initializeTaskDecorator(instance: Cleo) {
+let cleoInstance: CleoInstance | null = null;
+
+export function initializeTaskDecorator(instance: CleoInstance) {
   cleoInstance = instance;
 }
 
@@ -27,6 +31,9 @@ export function task(options: TaskOptions = {}): MethodDecorator {
 
     const queueName = options.queue || "default";
     const queueManager = cleoInstance.getQueueManager();
+    
+    // Check if we're in client mode (no workers)
+    const isClientMode = cleoInstance.isClientModeEnabled ? cleoInstance.isClientModeEnabled() : false;
 
     // Get or create queue
     let queue = queueManager.getQueue(queueName);
@@ -39,27 +46,30 @@ export function task(options: TaskOptions = {}): MethodDecorator {
 
       queue = queueManager.createQueue(queueName, {
         connection: redisConnection.getInstance("default"),
-      });
+      }, !isClientMode); // Only create workers if not in client mode
     }
 
-    // Get or initialize worker
-    const worker = queueManager.getWorker(queueName);
-    if (!worker) {
-      throw new Error(`No worker found for queue ${queueName}`);
-    }
-
-    // Register task handler
-    worker.registerTask(
-      methodName,
-      async function (this: typeof target, ...args: any[]) {
-        logger.debug("🎯 Task Decorator: Executing task", {
-          file: "task.ts",
-          function: methodName,
-          args,
-        });
-        return originalMethod.apply(this, args);
+    // Only register task handlers in worker mode
+    if (!isClientMode) {
+      // Get or initialize worker (only in worker mode)
+      const worker = queueManager.getWorker(queueName);
+      if (!worker) {
+        throw new Error(`No worker found for queue ${queueName}`);
       }
-    );
+
+      // Register task handler
+      worker.registerTask(
+        methodName,
+        async function (this: typeof target, ...args: any[]) {
+          logger.debug("🎯 Task Decorator: Executing task", {
+            file: "task.ts",
+            function: methodName,
+            args,
+          });
+          return originalMethod.apply(this, args);
+        }
+      );
+    }
 
     logger.info("🎯 Task Decorator: Task registered", {
       file: "task.ts",

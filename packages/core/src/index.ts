@@ -19,6 +19,8 @@ class Cleo {
   private isConfigured = false;
   private readonly instanceId: RedisInstance;
   public task: typeof task = task;
+  private isClientMode = false;
+  private isWorkerMode = false;
 
   constructor(instanceId: RedisInstance = RedisInstance.DEFAULT) {
     this.instanceId = instanceId;
@@ -164,6 +166,10 @@ export { Worker } from "./workers";
 
 // Export the task history service
 export { TaskHistoryService, type ExtendedTaskHistoryEntry } from "./services/taskHistory";
+
+// Export client and worker modes
+export { CleoClient } from "./modes/client-mode";
+export { CleoWorker } from "./modes/worker-mode";
 
 /**
  * Example usage:
