@@ -38,6 +38,7 @@ export class QueueManager {
   private metrics: QueueMetrics;
   private healthCheckInterval: NodeJS.Timeout | null = null;
   private shouldCreateWorkers: boolean = true;
+  private workerConfig: WorkerConfig = {};
 
   // Redis keys for queue tracking
   private readonly QUEUES_SET_KEY = QUEUES_SET_KEY;
@@ -58,11 +59,15 @@ export class QueueManager {
     this.metrics = new QueueMetrics(this.redis);
     this.shouldCreateWorkers = createWorkers;
 
+    console.log("🔍 QueueManager constructor:", { defaultQueueName, createWorkers, shouldCreateWorkers: this.shouldCreateWorkers });
+
     const finalQueueOptions: QueueOptions = {
       connection: this.redis.options,
       ...queueOptions,
     };
 
+    console.log("🔍 About to call initializeQueue");
+    this.workerConfig = workerOptions;
     this.initializeQueue(
       defaultQueueName,
       finalQueueOptions,
@@ -70,6 +75,7 @@ export class QueueManager {
       this.instanceId,
       createWorkers
     );
+    console.log("🔍 initializeQueue completed");
     this.observer = new TaskObserver(this.redis);
     this.groups = new Map();
     this.deadLetterQueue = new DeadLetterQueue(
@@ -104,10 +110,10 @@ export class QueueManager {
     );
     return metadata
       ? {
-          ...metadata,
-          createdAt: new Date(parseInt(metadata.createdAt)),
-          lastActivity: new Date(parseInt(metadata.lastActivity)),
-        }
+        ...metadata,
+        createdAt: new Date(parseInt(metadata.createdAt)),
+        lastActivity: new Date(parseInt(metadata.lastActivity)),
+      }
       : null;
   }
 
@@ -224,10 +230,14 @@ export class QueueManager {
     });
 
     this.queueEvents.set(queueName, queueEvents);
-    
+
     // Only create workers if requested
+    console.log("🔍 Debug initializeQueue:", { queueName, createWorkers, shouldCreateWorkers: this.shouldCreateWorkers });
     if (createWorkers) {
+      console.log("🔧 Creating worker for queue:", queueName);
       this.initializeWorker(queueName, workerOptions, instanceId);
+    } else {
+      console.log("⏭️ Skipping worker creation for queue:", queueName);
     }
   }
 
@@ -384,9 +394,9 @@ export class QueueManager {
     let queue = this.queues.get(queueName);
 
     if (!queue) {
-      this.initializeQueue(queueName, {
+      await this.initializeQueue(queueName, {
         connection: this.redis.options,
-      });
+      }, this.workerConfig, this.instanceId, this.shouldCreateWorkers);
       queue = this.queues.get(queueName);
     }
 
@@ -417,10 +427,10 @@ export class QueueManager {
 
     const job = jobOptions.repeat?.pattern
       ? await queue!.upsertJobScheduler(jobOptions.id, jobOptions.repeat, {
-          name,
-          data,
-          opts: jobOptions,
-        })
+        name,
+        data,
+        opts: jobOptions,
+      })
       : await queue!.add(name, data, jobOptions);
 
     this.observer.notify(
@@ -543,7 +553,8 @@ export class QueueManager {
       };
 
       group = new TaskGroup(this.redis, config);
-      group.connect(this, this.workers.get(config.name) as Worker);
+      const worker = this.shouldCreateWorkers ? this.workers.get(config.name) || null : null;
+      group.connect(this, worker);
       this.groups.set(groupName, group);
     }
 
@@ -604,7 +615,7 @@ export class QueueManager {
     this.observer.subscribe(
       ObserverEvent.TASK_ADDED,
       async (taskId, status, data) => {
-        if (data?.options?.group) {
+        if (data?.options?.group && this.shouldCreateWorkers) {
           const group = await this.getGroup(data.options.group);
           await group.startProcessing();
         }

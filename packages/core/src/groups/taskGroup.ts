@@ -82,15 +82,16 @@ export class TaskGroup {
   }
 
   /**
-   * Connect this group to a QueueManager and Worker
+   * Connect this group to a QueueManager and optionally a Worker
    */
-  connect(queueManager: QueueManager, worker: Worker): void {
+  connect(queueManager: QueueManager, worker: Worker | null): void {
     this.queueManager = queueManager;
     this.worker = worker;
-    logger.info("🔌 TaskGroup: connected to QueueManager and Worker", {
+    logger.info("🔌 TaskGroup: connected to QueueManager", {
       file: "taskGroup.ts",
       line: 45,
       function: "connect",
+      hasWorker: !!worker,
     });
   }
 
@@ -689,8 +690,18 @@ export class TaskGroup {
   }
 
   async startProcessing(): Promise<void> {
-    if (!this.queueManager || !this.worker) {
-      throw new Error("TaskGroup not connected to QueueManager and Worker");
+    if (!this.queueManager) {
+      throw new Error("TaskGroup not connected to QueueManager");
+    }
+
+    // In client mode, there's no worker and no processing needed
+    if (!this.worker) {
+      logger.debug("🔄 TaskGroup: No worker available (client mode), skipping processing", {
+        file: "taskGroup.ts",
+        function: "startProcessing",
+        groupName: this.config.name,
+      });
+      return;
     }
 
     if (this.isProcessing) return;

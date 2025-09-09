@@ -148,6 +148,13 @@ export function task(options: TaskOptions = {}): MethodDecorator {
             queueManager.onTaskEvent(
               ObserverEvent.TASK_FAILED,
               (failedTaskId: string, status: TaskStatus, data: any) => {
+                console.log("🔥 Task Decorator: Task failed", {
+                  file: "task.ts",
+                  function: methodName,
+                  failedTaskId,
+                  status,
+                  data: JSON.stringify(data),
+                });
                 if (!isSettled && failedTaskId === taskId) {
                   isSettled = true;
                   cleanup();

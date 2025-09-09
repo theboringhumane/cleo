@@ -14,7 +14,7 @@ const expectedTasks = 3;
 
 // Step 1: Setup Worker First
 console.log("1️⃣ Setting up Worker (Server)...");
-const worker = CleoWorker.getInstance("e2e-worker");
+const worker = CleoWorker.getInstance("e2e-worker" as any);
 await worker.configure({
   redis: {
     host: "localhost",
@@ -36,10 +36,10 @@ await workerQM.createQueue("payments", {
 }, true);
 
 // Register task handlers that will process client jobs
-worker.registerTaskHandler("sendWelcomeEmail", async (userId: string, email: string) => {
+worker.registerTaskHandler("sendWelcomeEmail", async ({ userId, email }: { userId: string, email: string }) => {
   console.log("📧 Worker: Processing welcome email", { userId, email });
-  const result = { 
-    success: true, 
+  const result = {
+    success: true,
     message: `Welcome email sent to ${email}`,
     processedAt: new Date().toISOString(),
     workerId: worker.getInstanceId()
@@ -49,7 +49,7 @@ worker.registerTaskHandler("sendWelcomeEmail", async (userId: string, email: str
   return result;
 }, "email");
 
-worker.registerTaskHandler("sendPasswordResetEmail", async (email: string, resetToken: string) => {
+worker.registerTaskHandler("sendPasswordResetEmail", async ({ email, resetToken }: { email: string, resetToken: string }) => {
   console.log("🔐 Worker: Processing password reset email", { email, resetToken });
   const result = {
     success: true,
@@ -63,7 +63,7 @@ worker.registerTaskHandler("sendPasswordResetEmail", async (email: string, reset
   return result;
 }, "email");
 
-worker.registerTaskHandler("processPayment", async (userId: string, amount: number, currency: string) => {
+worker.registerTaskHandler("processPayment", async ({ userId, amount, currency }: { userId: string, amount: number, currency: string }) => {
   console.log("💳 Worker: Processing payment", { userId, amount, currency });
   const result = {
     success: true,
@@ -81,7 +81,7 @@ console.log("✅ Worker setup complete with task handlers registered");
 
 // Step 2: Setup Client 
 console.log("\n2️⃣ Setting up Client (NextJS app simulation)...");
-const client = CleoClient.getInstance("e2e-client");
+const client = CleoClient.getInstance("e2e-client" as any);
 await client.configure({
   redis: {
     host: "localhost",
@@ -111,18 +111,18 @@ class EmailService {
     timeout: 30000,
     maxRetries: 3,
   })
-  async sendWelcomeEmail(userId: string, email: string): Promise<void> {
+  async sendWelcomeEmail({ userId, email }: { userId: string, email: string }): Promise<void> {
     console.log("📤 Client: Scheduling welcome email", { userId, email });
     // This will be queued, not executed immediately
   }
 
   @task({
-    priority: TaskPriority.MEDIUM,
+    priority: TaskPriority.LOW,
     queue: "email",
     group: "notifications",
     timeout: 30000,
   })
-  async sendPasswordResetEmail(email: string, resetToken: string): Promise<void> {
+  async sendPasswordResetEmail({ email, resetToken }: { email: string, resetToken: string }): Promise<void> {
     console.log("📤 Client: Scheduling password reset email", { email, resetToken });
     // This will be queued, not executed immediately
   }
@@ -136,7 +136,7 @@ class PaymentService {
     timeout: 60000,
     maxRetries: 5,
   })
-  async processPayment(userId: string, amount: number, currency: string): Promise<void> {
+  async processPayment({ userId, amount, currency }: { userId: string, amount: number, currency: string }): Promise<void> {
     console.log("📤 Client: Scheduling payment processing", { userId, amount, currency });
     // This will be queued, not executed immediately
   }
@@ -152,12 +152,12 @@ const paymentService = new PaymentService();
 
 // Simulate user registration flow
 console.log("👤 Simulating user registration flow...");
-await emailService.sendWelcomeEmail("user123", "john@example.com");
-await paymentService.processPayment("user123", 29.99, "USD");
+await emailService.sendWelcomeEmail({ userId: "user123", email: "john@example.com" });
+await paymentService.processPayment({ userId: "user123", amount: 29.99, currency: "USD" });
 
 // Simulate password reset flow  
 console.log("🔒 Simulating password reset flow...");
-await emailService.sendPasswordResetEmail("john@example.com", "reset_token_456");
+await emailService.sendPasswordResetEmail({ email: "john@example.com", resetToken: "reset_token_456" });
 
 console.log("✅ All jobs scheduled by client");
 
@@ -178,7 +178,7 @@ console.log("\n5️⃣ Verifying results...");
 
 if (processedTasks === expectedTasks) {
   console.log("🎉 SUCCESS: All tasks processed successfully!");
-  
+
   console.log("\n📋 Processing Results:");
   for (const [key, result] of Object.entries(results)) {
     console.log(`✅ ${key}:`, {
@@ -187,28 +187,28 @@ if (processedTasks === expectedTasks) {
       workerId: result.workerId
     });
   }
-  
+
   // Verify specific task results
   console.log("\n🔍 Detailed Verification:");
-  
+
   if (results['welcome-user123']) {
     console.log("✅ Welcome email processed correctly");
   } else {
     console.log("❌ Welcome email not processed");
   }
-  
+
   if (results['reset-john@example.com']) {
     console.log("✅ Password reset email processed correctly");
   } else {
     console.log("❌ Password reset email not processed");
   }
-  
+
   if (results['payment-user123']) {
     console.log("✅ Payment processed correctly");
   } else {
     console.log("❌ Payment not processed");
   }
-  
+
 } else {
   console.log(`❌ FAILURE: Only ${processedTasks}/${expectedTasks} tasks processed within ${maxWaitTime}ms`);
 }
@@ -220,19 +220,21 @@ try {
   const workerStatus = await worker.getWorkerStatus("email");
   console.log("📊 Email Worker Status:", {
     status: workerStatus?.status,
-    activeTasks: workerStatus?.activeTasks?.length || 0
+    activeTasks: workerStatus?.activeTasks?.length || 0,
+    workerStatus,
   });
-  
+
   const paymentWorkerStatus = await worker.getWorkerStatus("payments");
   console.log("📊 Payment Worker Status:", {
     status: paymentWorkerStatus?.status,
-    activeTasks: paymentWorkerStatus?.activeTasks?.length || 0
+    activeTasks: paymentWorkerStatus?.activeTasks?.length || 0,
+    workerStatus: paymentWorkerStatus,
   });
-  
+
   // Get queue metrics
   const emailMetrics = await workerQM.getQueueMetrics("email");
   const paymentMetrics = await workerQM.getQueueMetrics("payments");
-  
+
   console.log("📈 Queue Metrics:");
   console.log("  Email Queue:", {
     completed: emailMetrics?.completed || 0,
@@ -244,7 +246,7 @@ try {
     failed: paymentMetrics?.failed || 0,
     waiting: paymentMetrics?.waiting || 0
   });
-  
+
 } catch (error) {
   console.log("⚠️ Status check failed:", error);
 }

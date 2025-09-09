@@ -113,25 +113,19 @@ export class Worker extends BullWorker {
       });
 
       let data = job.data.args ?? job.data;
-      if (data.hasOwnProperty("data")) {
-        data = data.data;
-      }
-
       // Remove the options wrapper if it exists
       if (data.hasOwnProperty("options")) {
         const { options, ...taskData } = data;
         data = taskData;
       }
 
-      // If there's only one property that's not options, use its value
-      const dataKeys = Object.keys(data).filter(key => key !== "options");
-      if (dataKeys.length === 1) {
-        data = data[dataKeys[0]];
+      if (data.hasOwnProperty("data")) {
+        data = data.data;
       }
 
       await job.updateProgress(0);
 
-      const timeout = job.data.options?.timeout || 300000;
+      const timeout = job.data.options?.timeout || 300000; // in milliseconds, defaults to 5 minutes
       const timeoutPromise = new Promise((_, reject) => {
         setTimeout(() => {
           reject(new Error(`Task ${job.name} timed out after ${timeout}ms`));

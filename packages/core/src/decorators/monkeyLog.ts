@@ -3,7 +3,6 @@ import { WORKER_KEY } from "../constants";
 
 export function MonkeyCapture(fn: Function) {
   return async (...args: any[]) => {
-    const promise = fn(...args);
 
     const originalConsoleLog = console.log;
     const originalFetch = global.fetch;
@@ -12,6 +11,7 @@ export function MonkeyCapture(fn: Function) {
     const job = args[0];
     const workerId = args[1];
     const instance = args[2];
+    const promise = fn(args[3]);
 
     const redis = redisConnection.getInstance(instance);
 

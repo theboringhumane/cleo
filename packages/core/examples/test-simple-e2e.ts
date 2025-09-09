@@ -23,6 +23,11 @@ await worker.configure({
   },
 });
 
+// Debug: Check if worker exists for default queue
+const workerQM = worker.getQueueManager();
+const defaultWorker = workerQM.getWorker("default");
+console.log("🔍 Default worker exists:", !!defaultWorker);
+
 // Register a simple task handler (using default queue)
 worker.registerTaskHandler("simple-task", async (message: string) => {
   console.log("🎯 Worker: Processing task with message:", message);
