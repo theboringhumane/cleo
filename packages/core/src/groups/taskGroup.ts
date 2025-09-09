@@ -696,7 +696,7 @@ export class TaskGroup {
 
     // In client mode, there's no worker and no processing needed
     if (!this.worker) {
-      logger.debug("🔄 TaskGroup: No worker available (client mode), skipping processing", {
+      logger.info("🔄 TaskGroup: No worker available (client mode), skipping processing", {
         file: "taskGroup.ts",
         function: "startProcessing",
         groupName: this.config.name,

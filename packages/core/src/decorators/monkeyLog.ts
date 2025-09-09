@@ -17,6 +17,18 @@ export function MonkeyCapture(fn: Function) {
 
     const taskHistoryKey = `${WORKER_KEY}:${workerId}:task:${job.id}:logs`;
 
+    const parameters = args[3];
+
+    redis.lpush(
+      taskHistoryKey,
+      JSON.stringify({
+        timestamp: new Date().toISOString(),
+        level: "info",
+        message: "parameters",
+        functionArgs: parameters,
+      })
+    );
+
     // grep all the internal functions inside the wrapped function
     const internalFunctions = fn.toString().match(/function\s+(\w+)\s*\(/g);
 

@@ -94,6 +94,9 @@ export class Worker extends BullWorker {
     const startTime = Date.now();
     const group = job.data.options?.group;
 
+    // @ts-ignore
+    const timeout = job.data.options?.timeout || job.opts['timeout'] || 300000; // in milliseconds, defaults to 5 minutes
+
     // Track active task
     await this.addActiveTask(job.id!, job.name);
 
@@ -110,6 +113,7 @@ export class Worker extends BullWorker {
         name: job.name,
         group: group,
         data: job.data.args ?? job.data,
+        timeout: timeout
       });
 
       let data = job.data.args ?? job.data;
@@ -125,7 +129,6 @@ export class Worker extends BullWorker {
 
       await job.updateProgress(0);
 
-      const timeout = job.data.options?.timeout || 300000; // in milliseconds, defaults to 5 minutes
       const timeoutPromise = new Promise((_, reject) => {
         setTimeout(() => {
           reject(new Error(`Task ${job.name} timed out after ${timeout}ms`));

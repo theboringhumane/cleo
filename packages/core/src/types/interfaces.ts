@@ -33,6 +33,10 @@ export interface TaskOptions {
   removeOnComplete?: boolean;
   /** Weight of the task within its group (higher weight = higher priority) */
   weight?: number;
+  /** Remove the task from the queue after failure */
+  removeOnFail?: boolean;
+  /** Remove the task from the queue after failure */
+  removeDependencyOnFailure?: boolean;
 }
 
 /**

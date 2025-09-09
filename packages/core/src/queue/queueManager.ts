@@ -1,4 +1,4 @@
-import { Queue, QueueOptions, QueueEvents } from "bullmq";
+import { Queue, QueueOptions, QueueEvents, JobsOptions } from "bullmq";
 import { Task, TaskOptions, WorkerConfig } from "../types/interfaces";
 import {
   TaskState,
@@ -58,8 +58,6 @@ export class QueueManager {
     this.queueEvents = new Map();
     this.metrics = new QueueMetrics(this.redis);
     this.shouldCreateWorkers = createWorkers;
-
-    console.log("🔍 QueueManager constructor:", { defaultQueueName, createWorkers, shouldCreateWorkers: this.shouldCreateWorkers });
 
     const finalQueueOptions: QueueOptions = {
       connection: this.redis.options,
@@ -411,22 +409,32 @@ export class QueueManager {
       updatedAt: new Date(),
     };
 
-    const jobOptions = {
-      id: task.id,
+    data['options'] = {
+      timeout: options.timeout || 300000,
+      weight: options.weight || 1,
+      group: options.group || null,
+    }
+
+    const jobOptions: JobsOptions = {
       priority: options.priority,
       attempts: options.maxRetries,
       backoff: {
         type: "exponential",
         delay: options.retryDelay || 3000,
       },
-      timeout: options.timeout || 300000, // 5 minutes
       removeOnComplete: options.removeOnComplete || false,
       repeat: options.schedule,
       jobId: task.id,
+      removeOnFail: options.removeOnFail || false,
+      removeDependencyOnFailure: options.removeDependencyOnFailure || false,
+      // @ts-ignore
+      weight: options.weight || 1,
+      // @ts-ignore
+      group: options.group || null,
     };
 
     const job = jobOptions.repeat?.pattern
-      ? await queue!.upsertJobScheduler(jobOptions.id, jobOptions.repeat, {
+      ? await queue!.upsertJobScheduler(task.id, jobOptions.repeat, {
         name,
         data,
         opts: jobOptions,
@@ -573,7 +581,8 @@ export class QueueManager {
 
     const group = await this.getGroup(groupName);
     await group.addTask(methodName, taskOptions, taskData);
-    await group.startProcessing();
+    group.startProcessing();
+    return;
   }
 
   async ensureTaskInQueue(task: Task, queueName: string): Promise<void> {
