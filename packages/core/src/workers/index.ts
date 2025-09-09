@@ -31,6 +31,7 @@ export class Worker extends BullWorker {
   private taskHistoryKey: string;
   public workersKey: string;
   private taskHistoryService: TaskHistoryService;
+  private instanceId: string;
 
   constructor(
     queueName: string,
@@ -51,6 +52,8 @@ export class Worker extends BullWorker {
         maxStalledCount: 2, // Consider job stalled after 2 checks
       }
     );
+
+    this.instanceId = instanceId;
 
     this.redis = redis;
     this.observer = new TaskObserver(redis);
@@ -109,15 +112,17 @@ export class Worker extends BullWorker {
         data: job.data.args ?? job.data,
       });
 
-      // Extract the actual task data
-      let data = job.data;
-      
+      let data = job.data.args ?? job.data;
+      if (data.hasOwnProperty("data")) {
+        data = data.data;
+      }
+
       // Remove the options wrapper if it exists
       if (data.hasOwnProperty("options")) {
         const { options, ...taskData } = data;
         data = taskData;
       }
-      
+
       // If there's only one property that's not options, use its value
       const dataKeys = Object.keys(data).filter(key => key !== "options");
       if (dataKeys.length === 1) {
@@ -132,8 +137,9 @@ export class Worker extends BullWorker {
           reject(new Error(`Task ${job.name} timed out after ${timeout}ms`));
         }, timeout);
       });
+
       const result = await Promise.race([
-        Array.isArray(data) ? MonkeyCapture(handler)(...data) : MonkeyCapture(handler)(data),
+        MonkeyCapture(handler)(job, this._workerId, this.instanceId, ...data),
         timeoutPromise,
       ]);
 

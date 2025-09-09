@@ -8,13 +8,14 @@ export function MonkeyCapture(fn: Function) {
     const originalConsoleLog = console.log;
     const originalFetch = global.fetch;
 
-    // job is a arg and instanceId also
+    // job is a arg and workerId also
     const job = args[0];
-    const instanceId = args[1];
+    const workerId = args[1];
+    const instance = args[2];
 
-    const redis = redisConnection.getInstance(instanceId);
+    const redis = redisConnection.getInstance(instance);
 
-    const taskHistoryKey = `${WORKER_KEY}:${job.processedBy}:task:${job.id}:logs`;
+    const taskHistoryKey = `${WORKER_KEY}:${workerId}:task:${job.id}:logs`;
 
     // grep all the internal functions inside the wrapped function
     const internalFunctions = fn.toString().match(/function\s+(\w+)\s*\(/g);
