@@ -7,7 +7,96 @@ description: Track the latest updates and changes to Cleo.
 
 All notable changes to Cleo will be documented in this file.
 
-## [1.1.0-alpha] - 2025-03-13
+## [1.0.9] - "Confident Hofstadter" - 2025-01-27
+
+### 🚀 New Features
+#### Client-Server Architecture
+- 🔄 Implemented new CleoClient and CleoWorker classes for distributed task management
+- 🌐 Added seamless integration with NextJS and Bun
+- 📦 Enhanced queue management system with improved worker handling
+
+#### 🏗 Architecture Overview
+```
+flowchart LR
+    Client[CleoClient] -->|Schedule Tasks| Queue((Queue))
+    Queue -->|Process Tasks| Worker[CleoWorker]
+    Worker -->|Results| Client
+    subgraph "Task Processing"
+    Queue
+    Worker
+    end
+```
+
+#### 💻 Technical Implementation
+**Client Implementation:**
+```javascript
+import { CleoClient } from 'cleo';
+
+const client = new CleoClient({
+  endpoint: 'worker-url',
+  options: {
+    // client configuration
+  }
+});
+
+await client.scheduleTask({
+  type: 'processData',
+  payload: {...}
+});
+```
+
+**Worker Implementation:**
+```javascript
+import { CleoWorker } from 'cleo';
+
+const worker = new CleoWorker({
+  tasks: {
+    processData: async (payload) => {
+      // task implementation
+    }
+  }
+});
+
+worker.start();
+```
+
+### 📚 Documentation
+- Comprehensive documentation covering client-server setup and configuration
+- Task scheduling patterns guide
+- Worker pool management documentation
+- Integration guides for NextJS and Bun
+
+### 🔧 Dependencies
+- Added @types/node for TypeScript support
+- Added Bun runtime support packages
+
+### 📋 Setup Instructions
+1. Install the package: `npm install cleo@1.0.9`
+2. Add scripts to package.json:
+```json
+{
+  "scripts": {
+    "start:worker": "bun run worker.ts",
+    "start:client": "next dev"
+  }
+}
+```
+
+### ⚡ Performance
+- Improved task queue processing efficiency
+- Optimized worker handling for better resource utilization
+- Reduced latency in client-server communication
+
+### 🔐 Security
+- Implemented secure communication channels between client and worker
+- Added request validation and sanitization
+
+### 📝 Notes
+- This is a major architectural update that sets the foundation for distributed task processing
+- All client-server communications are type-safe and validated
+- Backward compatible with previous task definitions
+
+## [1.0.8] - 2025-03-13
 
 ### 🚀 New Features
 - Enhanced task decorator with improved event filtering and lifecycle management
@@ -39,7 +128,7 @@ All notable changes to Cleo will be documented in this file.
 - Added scaling guidelines
 - Enhanced monitoring documentation
 
-## [1.0.0-alpha] - 2024-03-20
+## [1.0.7] - 2024-03-20
 
 > **Note:** Cleo is currently in active development. Features and APIs may change.
 

@@ -21,7 +21,7 @@ export const siteConfig = {
   },
 
   app: {
-    latestVersion: '1.0.0-beta.5',
+    latestVersion: '1.0.9',
   },
 
   author: {
