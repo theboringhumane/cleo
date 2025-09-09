@@ -51,6 +51,14 @@ export const docsConfig: DocsConfig = {
           },
           items: [],
         },
+        {
+          href: '/docs/client-server-integration',
+          title: {
+            en: 'Client-Server Integration',
+            pt: 'Integração Cliente-Servidor',
+          },
+          items: [],
+        },
       ],
     },
     {
@@ -90,7 +98,7 @@ export const docsConfig: DocsConfig = {
             pt: 'Monitoramento e Eventos',
           },
           items: [],
-        },
+        }
       ],
     },
     {
