@@ -56,8 +56,16 @@ def generate_release_notes():
                 f.write(content)
 
     except Exception as error:
-        print(f"Error: {error}")
-        exit(1)
+        print(f"Warning: AI release notes failed ({error}); falling back to commit list.")
+        version = os.environ.get("NEW_VERSION", "unversioned")
+        name = os.environ.get("DOCKERLIKE_RELEASE_NAME", version)
+        commits = os.environ.get("COMMITS", "").replace(";", "\n- ")
+        with open("release_notes.md", "w") as f:
+            f.write(
+                f"## 🚀 {name} ({version})\n\n"
+                f"[📦 Container: ghcr.io/{os.environ.get('GITHUB_REPOSITORY', 'cleo')}:{version.replace('v', '')}]\n\n"
+                f"### Changes\n\n- {commits}\n"
+            )
 
 if __name__ == "__main__":
     generate_release_notes()
