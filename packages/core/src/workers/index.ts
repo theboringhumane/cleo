@@ -16,6 +16,7 @@ import { QueueManager } from "../queue/queueManager";
 import type { Redis } from "ioredis";
 import { MonkeyCapture } from "../decorators/monkeyLog";
 import { TaskHistoryService } from "../services/taskHistory";
+import { generateUUID } from "../utils";
 
 export class Worker extends BullWorker {
   private registeredTasks: Map<string, Function> = new Map();
@@ -63,7 +64,8 @@ export class Worker extends BullWorker {
     this.observer = new TaskObserver(redis);
     this.setObservers(this.observer);
 
-    this._workerId = this.id;
+    this._workerId =
+      typeof this.id === "string" && this.id ? this.id : generateUUID();
     this._queueName = queueName;
 
     // Initialize Redis keys
@@ -146,7 +148,12 @@ export class Worker extends BullWorker {
       let result;
       try {
         result = await Promise.race([
-          MonkeyCapture(handler)(job, this._workerId, this.instanceId, ...(Array.isArray(data) ? data : [data])),
+          MonkeyCapture(handler)(
+            job,
+            this._workerId || this.id,
+            this.instanceId,
+            ...(Array.isArray(data) ? data : [data])
+          ),
           timeoutPromise,
         ]);
       } finally {

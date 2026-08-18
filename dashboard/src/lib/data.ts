@@ -80,6 +80,9 @@ export interface ScheduledJob {
 export interface MonkeyLogEntry {
   workerId: string
   jobId: string
+  jobName?: string
+  queueName?: string
+  group?: string
   timestamp: string
   level: string
   message: string
@@ -373,20 +376,29 @@ export const getMonkeyLogs = createServerFn({ method: 'GET' })
 
     const logKeys = await redis.keys(`${KEYS.WORKER_KEY}:*:task:*:logs`)
     const entries: MonkeyLogEntry[] = []
+    const asId = (v: unknown) =>
+      typeof v === 'string' && v !== 'undefined' && v !== 'null' && v.length > 0 ? v : undefined
 
     for (const key of logKeys) {
-      const match = key.match(/^cleo:worker:([^:]+):task:(.+):logs$/)
-      if (!match) continue
-      const workerId = match[1]
-      const jobId = match[2]
+      const prefix = `${KEYS.WORKER_KEY}:`
+      if (!key.startsWith(prefix) || !key.endsWith(':logs')) continue
+      const mid = key.slice(prefix.length, -':logs'.length)
+      const sep = ':task:'
+      const sepAt = mid.indexOf(sep)
+      if (sepAt < 0) continue
+      const workerIdFromKey = mid.slice(0, sepAt)
+      const jobIdFromKey = mid.slice(sepAt + sep.length)
 
       const raw = await redis.lrange(key, 0, limit - 1)
       for (const r of raw) {
         const parsed = safeParse(r)
         if (parsed) {
           entries.push({
-            workerId,
-            jobId,
+            workerId: asId(parsed.workerId) || asId(workerIdFromKey) || '',
+            jobId: asId(parsed.jobId) || asId(jobIdFromKey) || '',
+            jobName: asId(parsed.jobName),
+            queueName: asId(parsed.queueName),
+            group: asId(parsed.group),
             timestamp: parsed.timestamp,
             level: parsed.level || 'info',
             message: parsed.message || '',
