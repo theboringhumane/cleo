@@ -1,0 +1,15 @@
+**/node_modules
+**/dist
+**/.next
+**/.turbo
+**/.git
+**/.env
+**/.env.*
+**/logs
+**/coverage
+*.tgz
+*.tsbuildinfo
+docs
+packages/core/examples
+scripts
+images

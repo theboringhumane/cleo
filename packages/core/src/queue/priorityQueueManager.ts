@@ -223,50 +223,44 @@ export class PriorityQueueManager {
   }
 
   async getTaskState(jobId: string): Promise<TaskState> {
-    const job = this.queues.get(jobId);
-    if (!job) {
-      log(
-        LogLevel.ERROR,
-        `priorityQueueManager.ts: 🔌 60 getTaskState; jobId, ${jobId}`,
-        "Invalid task ID"
-      );
-      throw new Error("Invalid task ID");
+    for (const [queueName, queue] of this.queues) {
+      const job = await queue.getJob(jobId);
+      if (job) {
+        const state = await job.getState();
+        log(
+          LogLevel.INFO,
+          `priorityQueueManager.ts: getTaskState; jobId=${jobId}, queue=${queueName}, state=${state}`,
+          JSON.stringify({ jobId, queueName, state })
+        );
+        return state as TaskState;
+      }
     }
-    const state = await job.getJobState(jobId);
     log(
-      LogLevel.INFO,
-      `priorityQueueManager.ts: 🔌 65 getTaskState; jobId, ${jobId}, state, ${state}`,
-      JSON.stringify({ jobId, state })
+      LogLevel.ERROR,
+      `priorityQueueManager.ts: getTaskState; jobId=${jobId}`,
+      "Job not found in any queue"
     );
-    return state as TaskState;
+    throw new Error(`Job ${jobId} not found in any queue`);
   }
 
   async updateJobState(jobId: string, state: TaskState): Promise<void> {
-    const queue = this.queues.get(jobId);
-    if (queue) {
+    for (const [queueName, queue] of this.queues) {
       const job = await queue.getJob(jobId);
       if (job) {
         await job.updateData({ ...job.data, state });
         log(
           LogLevel.INFO,
-          `priorityQueueManager.ts 🔌: 170 updateJobState; jobId, ${jobId}, state, ${state}`,
-          JSON.stringify({ jobId, state })
+          `priorityQueueManager.ts: updateJobState; jobId=${jobId}, queue=${queueName}, state=${state}`,
+          JSON.stringify({ jobId, queueName, state })
         );
-      } else {
-        log(
-          LogLevel.ERROR,
-          `priorityQueueManager.ts 🔌: 173 updateJobState; jobId, ${jobId}`,
-          "Job not found"
-        );
-        throw new Error("Job not found");
+        return;
       }
-    } else {
-      log(
-        LogLevel.ERROR,
-        `priorityQueueManager.ts 🔌: 173 updateJobState; jobId, ${jobId}`,
-        "Queue not found"
-      );
-      throw new Error("Queue not found");
     }
+    log(
+      LogLevel.ERROR,
+      `priorityQueueManager.ts: updateJobState; jobId=${jobId}`,
+      "Job not found in any queue"
+    );
+    throw new Error(`Job ${jobId} not found in any queue`);
   }
 }

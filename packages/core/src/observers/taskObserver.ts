@@ -162,11 +162,23 @@ export class TaskObserver {
       });
   }
 
-  unsubscribe(event: ObserverEvent): void {
+  unsubscribe(event: ObserverEvent, callback?: TaskObserverCallback): void {
+    if (callback) {
+      const list = this.callbacks.get(event);
+      if (!list) return;
+      const next = list.filter((cb) => cb !== callback);
+      if (next.length > 0) {
+        this.callbacks.set(event, next);
+        return;
+      }
+      this.callbacks.delete(event);
+    } else {
+      this.callbacks.delete(event);
+    }
+
     const channel = this.getChannelName(event);
     this.subscriberClient.unsubscribe(channel)
       .then(() => {
-        this.callbacks.delete(event);
         logger.debug("👋 TaskObserver: Unsubscribed from channel", {
           file: "taskObserver.ts",
           function: "unsubscribe",

@@ -1,6 +1,7 @@
 import { QueueManager } from "../queue/queueManager";
 import { redisConnection, RedisInstance } from "../config/redis";
 import { logger } from "../utils/logger";
+import { task as taskDecorator } from "../decorators/task";
 
 /**
  * Client mode for Cleo - only schedules jobs, no workers
@@ -172,7 +173,24 @@ export class CleoClient {
    * Get the task decorator for this instance
    */
   get task() {
-    const { task } = require("../decorators/task");
-    return task;
+    return taskDecorator;
+  }
+
+  /**
+   * Gracefully close all queue/observer connections and stop background
+   * intervals. Call this on process shutdown so Redis connections don't leak.
+   */
+  async shutdown(): Promise<void> {
+    if (this.queueManager) {
+      await this.queueManager.close();
+      this.queueManager = null;
+    }
+    await redisConnection.closeInstance(this.instanceId);
+    this.isConfigured = false;
+    logger.info("🛑 CleoClient: shutdown complete", {
+      file: "client-mode.ts",
+      function: "shutdown",
+      instanceId: this.instanceId,
+    });
   }
 }

@@ -32,6 +32,7 @@ export class Worker extends BullWorker {
   public workersKey: string;
   private taskHistoryService: TaskHistoryService;
   private instanceId: string;
+  private heartbeatTimer: NodeJS.Timeout | null = null;
 
   constructor(
     queueName: string,
@@ -45,7 +46,10 @@ export class Worker extends BullWorker {
         await this.JobProcessor(job);
       },
       {
-        connection: redis,
+        // BullMQ workers perform blocking pops and need a DEDICATED
+        // connection; sharing the manager's instance across workers causes
+        // contention. duplicate() preserves host/port/password/db config.
+        connection: redis.duplicate(),
         ...config,
         // Add stalling detection
         stalledInterval: 30000, // Check for stalled jobs every 30 seconds
@@ -129,16 +133,25 @@ export class Worker extends BullWorker {
 
       await job.updateProgress(0);
 
+      let timeoutTimer: NodeJS.Timeout | undefined;
       const timeoutPromise = new Promise((_, reject) => {
-        setTimeout(() => {
+        timeoutTimer = setTimeout(() => {
           reject(new Error(`Task ${job.name} timed out after ${timeout}ms`));
         }, timeout);
+        if (typeof timeoutTimer.unref === "function") {
+          timeoutTimer.unref();
+        }
       });
 
-      const result = await Promise.race([
-        MonkeyCapture(handler)(job, this._workerId, this.instanceId, ...data),
-        timeoutPromise,
-      ]);
+      let result;
+      try {
+        result = await Promise.race([
+          MonkeyCapture(handler)(job, this._workerId, this.instanceId, ...(Array.isArray(data) ? data : [data])),
+          timeoutPromise,
+        ]);
+      } finally {
+        clearTimeout(timeoutTimer);
+      }
 
       await job.updateProgress(100);
 
@@ -245,30 +258,49 @@ export class Worker extends BullWorker {
   }
 
   private startHeartbeat(): void {
-    setInterval(async () => {
-      if (this.isRunning()) {
-        await this.redis.set(this.lastHeartbeatKey, Date.now().toString());
-        await this.redis.set(this.statusKey, "active");
-      } else {
-        await this.redis.set(this.statusKey, "paused");
+    if (this.heartbeatTimer) {
+      clearInterval(this.heartbeatTimer);
+    }
+
+    this.heartbeatTimer = setInterval(async () => {
+      try {
+        if (this.isRunning()) {
+          await this.redis.set(this.lastHeartbeatKey, Date.now().toString());
+          await this.redis.set(this.statusKey, "active");
+        } else {
+          await this.redis.set(this.statusKey, "paused");
+        }
+      } catch (error) {
+        logger.error("❌ Worker: Heartbeat update failed", {
+          file: "workers/index.ts",
+          function: "startHeartbeat",
+          workerId: this._workerId,
+          error,
+        });
       }
     }, 5000); // Update every 5 seconds
+
+    if (typeof this.heartbeatTimer.unref === "function") {
+      this.heartbeatTimer.unref();
+    }
   }
 
   private async updateMetrics(
     success: boolean,
     duration: number
   ): Promise<void> {
-    const multi = this.redis.multi();
-    multi.hincrby(this.metricsKey, "tasksProcessed", 1);
-    multi.hincrby(
+    // Apply the increments FIRST, then read the post-increment values for the
+    // history snapshot. Reading before exec() captured stale counters.
+    const incr = this.redis.multi();
+    incr.hincrby(this.metricsKey, "tasksProcessed", 1);
+    incr.hincrby(
       this.metricsKey,
       success ? "tasksSucceeded" : "tasksFailed",
       1
     );
-    multi.hincrby(this.metricsKey, "totalProcessingTime", duration);
+    incr.hincrby(this.metricsKey, "totalProcessingTime", duration);
+    await incr.exec();
 
-    // Store historical metrics with timestamp
     const timestamp = new Date().toISOString();
     const historyKey = `worker:${this._workerId}:metrics:history`;
     const metrics: WorkerMetrics & { timestamp: string } = {
@@ -288,10 +320,10 @@ export class Worker extends BullWorker {
       ),
     };
 
-    multi.lpush(historyKey, JSON.stringify(metrics));
-    multi.ltrim(historyKey, 0, 99); // Keep last 100 entries
-
-    await multi.exec();
+    const history = this.redis.multi();
+    history.lpush(historyKey, JSON.stringify(metrics));
+    history.ltrim(historyKey, 0, 99); // Keep last 100 entries
+    await history.exec();
   }
 
   private async addActiveTask(jobId: string, taskName: string): Promise<void> {

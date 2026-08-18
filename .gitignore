@@ -49,4 +49,7 @@ yarn-error.log*
 .DS_Store
 *.pem
 *.tsbuildinfo
+*.tgz
 packages/core/dist*
+dashboard/dist*
+dashboard/node_modules

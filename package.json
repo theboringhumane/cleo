@@ -7,13 +7,16 @@
     "dashboard"
   ],
   "scripts": {
-    "build:core": "yarn workspace @cleo/core build",
-    "build:docs": "yarn workspace @cleo/docs build",
-    "start:core": "yarn workspace @cleo/core start",
-    "start:docs": "yarn workspace @cleo/docs start",
-    "start": "concurrently \"yarn start:core\" \"yarn start:docs\"",
-    "dev:core": "yarn workspace @cleo/core dev",
-    "dev:docs": "yarn workspace @cleo/docs dev",
+    "build:core": "yarn workspace @cleotasks/core build",
+    "build:docs": "yarn workspace opendocs build",
+    "build:dashboard": "bun --cwd dashboard run build",
+    "start:core": "yarn workspace @cleotasks/core start",
+    "start:docs": "yarn workspace opendocs start",
+    "start:dashboard": "bun --cwd dashboard run start",
+    "start": "bun --cwd dashboard run start",
+    "dev:core": "yarn workspace @cleotasks/core dev",
+    "dev:docs": "yarn workspace opendocs dev",
+    "dev:dashboard": "bun --cwd dashboard run dev",
     "example:basic": "yarn workspace @cleo/example-basic start"
   }
 }

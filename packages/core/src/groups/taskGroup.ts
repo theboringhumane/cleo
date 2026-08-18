@@ -1,5 +1,5 @@
 import { Redis } from "ioredis";
-import { TaskStatus, TaskState, GroupProcessingStrategy } from "../types/enums";
+import { TaskStatus, TaskState, GroupProcessingStrategy, ObserverEvent } from "../types/enums";
 import { logger } from "../utils/logger";
 import type { Task, TaskOptions } from "../types/interfaces";
 import type { Worker } from "../workers";
@@ -45,6 +45,8 @@ export class TaskGroup {
   private lockHolder: string;
   private isProcessing: boolean = false;
   private processingInterval: NodeJS.Timeout | null = null;
+  private subscriber: Redis | null = null;
+  private isSubscribed: boolean = false;
 
   constructor(redis: Redis, config: GroupConfig) {
     this.redis = redis;
@@ -237,9 +239,11 @@ export class TaskGroup {
   async getAllTasks(): Promise<
     [taskId: string, queue: string, taskData: any, taskMethod: string][]
   > {
-    // get all tasks from redis
-    const tasks = await this.redis.hgetall(this.stateKey);
-    const taskIds = Object.keys(tasks);
+    // Task membership lives in the group set; per-task details live in the
+    // `${groupKey}:tasks:${taskId}` hash written by addTask. stateKey may also
+    // retain completed/failed entries whose detail hash has been deleted, so
+    // skip anything without details rather than crashing on JSON.parse(null).
+    const taskIds = await this.redis.smembers(this.groupKey);
 
     const result: [
       taskId: string,
@@ -249,17 +253,21 @@ export class TaskGroup {
     ][] = [];
 
     for (const taskId of taskIds) {
-      const options = await this.redis.hget(`${this.groupKey}:options`, taskId);
-      const taskData = await this.redis.hget(`${this.groupKey}:data`, taskId);
-      const taskMethod = await this.redis.hget(
-        `${this.groupKey}:method`,
-        taskId
-      );
+      const details = await this.getTaskOptionsAndData(taskId);
+      if (!details) {
+        logger.warn("⚠️ TaskGroup: Task details missing, skipping", {
+          file: "taskGroup.ts",
+          function: "getAllTasks",
+          groupName: this.config.name,
+          taskId,
+        });
+        continue;
+      }
       result.push([
         taskId,
-        JSON.parse(options!)["queue"],
-        JSON.parse(taskData!),
-        taskMethod!,
+        details.options.queue ?? this.config.name,
+        details.data,
+        details.method!,
       ]);
     }
 
@@ -359,12 +367,16 @@ export class TaskGroup {
     data: any;
     method: string | null;
   } | null> {
-    const options = await this.redis.hget(`${this.groupKey}:options`, taskId);
-    const data = await this.redis.hget(`${this.groupKey}:data`, taskId);
-    const method = await this.redis.hget(`${this.groupKey}:method`, taskId);
-    return options && data
-      ? { options: JSON.parse(options), data: JSON.parse(data), method }
-      : null;
+    const taskDetails = await this.redis.hgetall(`${this.groupKey}:tasks:${taskId}`);
+    if (!taskDetails || !taskDetails.method || !taskDetails.data || !taskDetails.options) {
+      return null;
+    }
+    
+    return {
+      options: JSON.parse(taskDetails.options),
+      data: JSON.parse(taskDetails.data),
+      method: taskDetails.method
+    };
   }
 
   async getTasksWithDetails(): Promise<Task[]> {
@@ -496,19 +508,18 @@ export class TaskGroup {
   > {
     return retryWithBackoff(
       async () => {
-        const multi = this.redis.multi();
-
         try {
+          // WATCH must be issued before MULTI so optimistic locking works.
           await this.redis.watch(this.processingOrderKey);
 
           // Check concurrency limits
           const processing = await this.redis.scard(this.processingKey);
           if (processing >= (this.config.maxConcurrency || 10)) {
-            await this.redis.unwatch();
             return null;
           }
 
-          // Get tasks based on strategy
+          // Get tasks based on strategy. All reads happen on the watched
+          // connection; no writes are performed here so the WATCH stays valid.
           let tasks: string[] = [];
           switch (this.config.strategy) {
             case GroupProcessingStrategy.LIFO:
@@ -517,56 +528,52 @@ export class TaskGroup {
             case GroupProcessingStrategy.PRIORITY:
               tasks = await this.redis.zrevrange(this.processingOrderKey, 0, 0);
               break;
-            case GroupProcessingStrategy.ROUND_ROBIN:
-              // Get all tasks and their scores
+            case GroupProcessingStrategy.ROUND_ROBIN: {
+              // Pick the task with the oldest score. Rotation is achieved by
+              // removing it from the order set below (zrem), not by rewriting
+              // its score here — a write would abort the WATCH mid-transaction.
               const allTasks = await this.redis.zrange(
                 this.processingOrderKey,
                 0,
                 -1,
-                'WITHSCORES'
+                "WITHSCORES"
               );
-              
-              if (allTasks.length === 0) {
-                tasks = [];
-              } else {
-                // Find the task with the oldest processing time
+
+              if (allTasks.length > 0) {
                 let oldestTime = Infinity;
-                let selectedTask = null;
-                
+                let selectedTask: string | null = null;
+
                 for (let i = 0; i < allTasks.length; i += 2) {
                   const taskId = allTasks[i];
-                  const score = parseInt(allTasks[i + 1]);
-                  
+                  const score = parseInt(allTasks[i + 1], 10);
+
                   if (score < oldestTime) {
                     oldestTime = score;
                     selectedTask = taskId;
                   }
                 }
-                
+
                 if (selectedTask) {
                   tasks = [selectedTask];
-                  // Update the processing time for the selected task
-                  await this.redis.zadd(
-                    this.processingOrderKey,
-                    Date.now().toString(),
-                    selectedTask
-                  );
                 }
               }
               break;
+            }
             case GroupProcessingStrategy.FIFO:
             default:
               tasks = await this.redis.zrange(this.processingOrderKey, 0, 0);
           }
 
           if (tasks.length === 0) {
-            await this.redis.unwatch();
             return null;
           }
 
           const nextTask = tasks[0];
           const now = Date.now();
 
+          // Build and execute the claim atomically. If another client mutated
+          // the watched key in the meantime, exec() returns null and we retry.
+          const multi = this.redis.multi();
           multi.zrem(this.processingOrderKey, nextTask);
           multi.sadd(this.processingKey, nextTask);
           multi.hset(
@@ -612,6 +619,10 @@ export class TaskGroup {
             error,
           });
           throw error;
+        } finally {
+          // Always clear the WATCH so a failure/early-return does not leave the
+          // connection watched and break subsequent transactions.
+          await this.redis.unwatch().catch(() => {});
         }
       },
       3,
@@ -620,27 +631,64 @@ export class TaskGroup {
   }
 
   async processNextTask(): Promise<void> {
-    if (!this.queueManager || !this.worker) {
-      throw new Error("TaskGroup not connected to QueueManager and Worker");
+    if (!this.queueManager) {
+      throw new Error("TaskGroup not connected to QueueManager");
     }
 
     try {
       // Check if we can process more tasks
       const processing = await this.redis.scard(this.processingKey);
       if (processing >= (this.config.concurrency || 1)) {
+        logger.info("⏸️ TaskGroup: Concurrency limit reached", {
+          file: "taskGroup.ts",
+          function: "processNextTask",
+          groupName: this.config.name,
+          processing,
+          maxConcurrency: this.config.concurrency || 1,
+        });
         return;
       }
 
       // Check rate limit
       if (!(await this.checkRateLimit())) {
+        logger.info("⏸️ TaskGroup: Rate limit exceeded", {
+          file: "taskGroup.ts",
+          function: "processNextTask",
+          groupName: this.config.name,
+        });
         return;
       }
 
+      logger.info("🔍 TaskGroup: Getting next task", {
+        file: "taskGroup.ts",
+        function: "processNextTask",
+        groupName: this.config.name,
+        processing,
+        maxConcurrency: this.config.concurrency || 1,
+      });
+
       const nextTask = await this.getNextTask();
-      if (!nextTask) return;
+      if (!nextTask) {
+        logger.info("⏸️ TaskGroup: No next task available", {
+          file: "taskGroup.ts",
+          function: "processNextTask",
+          groupName: this.config.name,
+        });
+        return;
+      }
 
       const [nextTaskId, queueName, taskData, taskMethod, taskOptions] =
         nextTask;
+
+      logger.info("🎯 TaskGroup: Processing task", {
+        file: "taskGroup.ts",
+        function: "processNextTask",
+        groupName: this.config.name,
+        taskId: nextTaskId,
+        taskMethod,
+        queueName,
+        taskData,
+      });
 
       // Update task status to processing
       await this.updateTaskStatus(nextTaskId, TaskStatus.ACTIVE);
@@ -670,10 +718,14 @@ export class TaskGroup {
       // Instead of processing directly, ensure the task is in the queue
       await this.queueManager.ensureTaskInQueue(task, queueName);
 
-      logger.debug("🚀 TaskGroup: Processing task", {
+      // Set up completion handlers for this task
+      this.setupTaskCompletionHandlers(nextTaskId, taskMethod);
+
+      logger.info("🚀 TaskGroup: Task moved to BullMQ queue", {
         file: "taskGroup.ts",
         function: "processNextTask",
         taskId: nextTaskId,
+        taskName: taskMethod,
         queueName,
         strategy: this.config.strategy,
         concurrency: await this.redis.scard(this.processingKey),
@@ -694,37 +746,189 @@ export class TaskGroup {
       throw new Error("TaskGroup not connected to QueueManager");
     }
 
-    // In client mode, there's no worker and no processing needed
-    if (!this.worker) {
-      logger.info("🔄 TaskGroup: No worker available (client mode), skipping processing", {
-        file: "taskGroup.ts",
-        function: "startProcessing",
-        groupName: this.config.name,
-      });
-      return;
-    }
-
     if (this.isProcessing) return;
 
     this.isProcessing = true;
-    this.processingInterval = setInterval(() => {
-      this.processNextBatch().catch(error => {
-        logger.error("❌ TaskGroup: Error in processing interval", {
-          file: "taskGroup.ts",
-          function: "startProcessing",
-          error
-        });
-      });
-    }, 1000);
-
+    
+    // Start Redis pub/sub subscription for real-time task notifications
+    await this.startRedisSubscription();
+    
+    // Process any existing tasks immediately
     await this.processNextBatch();
+  }
+
+  private async startRedisSubscription(): Promise<void> {
+    if (this.isSubscribed) return;
+
+    try {
+      // Create a dedicated subscriber connection by duplicating the configured
+      // Redis instance, preserving host/port/password/db. A subscriber
+      // connection cannot be shared with normal commands.
+      this.subscriber = this.redis.duplicate();
+
+      const channel = `group:${this.config.name}:new-task`;
+      
+      await this.subscriber.subscribe(channel);
+      
+      this.subscriber.on("message", (channel, message) => {
+        try {
+          const data = JSON.parse(message);
+          logger.info("🔔 TaskGroup: Received new task notification", {
+            file: "taskGroup.ts",
+            function: "startRedisSubscription",
+            groupName: this.config.name,
+            taskId: data.taskId,
+            methodName: data.methodName,
+          });
+          
+          // Trigger immediate processing of new tasks
+          this.processNextBatch().catch(error => {
+            logger.error("❌ TaskGroup: Error processing new task", {
+              file: "taskGroup.ts",
+              function: "startRedisSubscription",
+              error
+            });
+          });
+        } catch (error) {
+          logger.error("❌ TaskGroup: Error parsing notification", {
+            file: "taskGroup.ts",
+            function: "startRedisSubscription",
+            error
+          });
+        }
+      });
+
+      this.isSubscribed = true;
+      
+      logger.info("🔔 TaskGroup: Started Redis subscription", {
+        file: "taskGroup.ts",
+        function: "startRedisSubscription",
+        groupName: this.config.name,
+        channel,
+      });
+    } catch (error) {
+      logger.error("❌ TaskGroup: Failed to start Redis subscription", {
+        file: "taskGroup.ts",
+        function: "startRedisSubscription",
+        error
+      });
+    }
   }
 
   async stopProcessing(): Promise<void> {
     this.isProcessing = false;
+    
     if (this.processingInterval) {
       clearInterval(this.processingInterval);
       this.processingInterval = null;
+    }
+    
+    // Clean up Redis subscription
+    if (this.subscriber && this.isSubscribed) {
+      try {
+        await this.subscriber.unsubscribe(`group:${this.config.name}:new-task`);
+        await this.subscriber.quit();
+        this.subscriber = null;
+        this.isSubscribed = false;
+        
+        logger.info("🔔 TaskGroup: Stopped Redis subscription", {
+          file: "taskGroup.ts",
+          function: "stopProcessing",
+          groupName: this.config.name,
+        });
+      } catch (error) {
+        logger.error("❌ TaskGroup: Error stopping Redis subscription", {
+          file: "taskGroup.ts",
+          function: "stopProcessing",
+          error
+        });
+      }
+    }
+  }
+
+  private setupTaskCompletionHandlers(taskId: string, taskMethod: string): void {
+    if (!this.queueManager) return;
+
+    const settle = () => {
+      this.queueManager?.offTaskEvent(ObserverEvent.TASK_COMPLETED, onCompleted);
+      this.queueManager?.offTaskEvent(ObserverEvent.TASK_FAILED, onFailed);
+      clearTimeout(listenerCleanupTimer);
+    };
+
+    // Listen for task completion events from the queue manager
+    const onCompleted = (completedTaskId: string, status: TaskStatus, data: any) => {
+      if (completedTaskId !== taskId) return;
+
+      logger.info("✅ TaskGroup: Task completed", {
+        file: "taskGroup.ts",
+        function: "setupTaskCompletionHandlers",
+        groupName: this.config.name,
+        taskId,
+        taskMethod,
+        status,
+      });
+
+      settle();
+
+      // Complete the task in the group
+      this.completeTask(taskId).catch((error) => {
+        logger.error("❌ TaskGroup: Failed to complete task", {
+          file: "taskGroup.ts",
+          function: "setupTaskCompletionHandlers",
+          taskId,
+          error,
+        });
+      });
+    };
+
+    const onFailed = (failedTaskId: string, status: TaskStatus, data: any) => {
+      if (failedTaskId !== taskId) return;
+
+      logger.info("❌ TaskGroup: Task failed", {
+        file: "taskGroup.ts",
+        function: "setupTaskCompletionHandlers",
+        groupName: this.config.name,
+        taskId,
+        taskMethod,
+        status,
+      });
+
+      settle();
+
+      // Fail the task in the group
+      this.failTask(taskId, new Error(data?.error || "Task failed")).catch((error) => {
+        logger.error("❌ TaskGroup: Failed to fail task", {
+          file: "taskGroup.ts",
+          function: "setupTaskCompletionHandlers",
+          taskId,
+          error,
+        });
+      });
+    };
+
+    // Register event listeners for the specific task
+    this.queueManager.onTaskEvent(ObserverEvent.TASK_COMPLETED, onCompleted);
+    this.queueManager.onTaskEvent(ObserverEvent.TASK_FAILED, onFailed);
+
+    // Safety net: if no completion/failure event ever arrives (e.g. the worker
+    // crashed), drop this task's listeners so they don't accumulate forever.
+    // recoverStuckTasks() is responsible for re-queueing the orphaned task —
+    // we deliberately do NOT force-complete here.
+    const listenerTtl = (this.config.timeout || 300000) + 30000;
+    const listenerCleanupTimer = setTimeout(() => {
+      this.queueManager?.offTaskEvent(ObserverEvent.TASK_COMPLETED, onCompleted);
+      this.queueManager?.offTaskEvent(ObserverEvent.TASK_FAILED, onFailed);
+      logger.warn("⚠️ TaskGroup: Completion listeners expired without event", {
+        file: "taskGroup.ts",
+        function: "setupTaskCompletionHandlers",
+        groupName: this.config.name,
+        taskId,
+        listenerTtl,
+      });
+    }, listenerTtl);
+    // Don't keep the process alive just for this cleanup timer
+    if (typeof listenerCleanupTimer.unref === "function") {
+      listenerCleanupTimer.unref();
     }
   }
 
@@ -732,8 +936,39 @@ export class TaskGroup {
     if (!this.isProcessing) return;
 
     try {
+      // Check if there are any tasks to process
+      const pendingTasksCount = await this.redis.zcard(this.processingOrderKey);
+      const activeTasks = await this.redis.scard(this.processingKey);
+      
+      logger.info("🔍 TaskGroup: Batch processing check", {
+        file: "taskGroup.ts",
+        function: "processNextBatch",
+        groupName: this.config.name,
+        pendingTasks: pendingTasksCount,
+        activeTasks,
+        maxConcurrency: this.config.concurrency || 1,
+        isProcessing: this.isProcessing,
+      });
+
+      if (pendingTasksCount === 0) {
+        logger.info("⏸️ TaskGroup: No pending tasks to process", {
+          file: "taskGroup.ts",
+          function: "processNextBatch",
+          groupName: this.config.name,
+        });
+        return; // No tasks to process
+      }
+
       const promises: Promise<void>[] = [];
       const concurrency = this.config.concurrency || 1;
+
+      logger.info("🚀 TaskGroup: Starting batch processing", {
+        file: "taskGroup.ts",
+        function: "processNextBatch",
+        groupName: this.config.name,
+        concurrency,
+        pendingTasks: pendingTasksCount,
+      });
 
       // Process up to concurrency limit
       for (let i = 0; i < concurrency; i++) {
@@ -742,7 +977,7 @@ export class TaskGroup {
 
       await Promise.all(promises);
 
-      logger.debug("✅ TaskGroup: Processed batch", {
+      logger.info("✅ TaskGroup: Processed batch", {
         file: "taskGroup.ts",
         function: "processNextBatch",
         groupName: this.config.name,
@@ -819,16 +1054,15 @@ export class TaskGroup {
       // Remove from processing order and group
       await this.redis.zrem(this.processingOrderKey, taskId);
       await this.redis.srem(this.groupKey, taskId);
+      await this.redis.srem(this.processingKey, taskId);
 
       // Clean up task data
-      await this.redis.hdel(`${this.groupKey}:options`, taskId);
-      await this.redis.hdel(`${this.groupKey}:data`, taskId);
-      await this.redis.hdel(`${this.groupKey}:method`, taskId);
+      await this.redis.del(`${this.groupKey}:tasks:${taskId}`);
 
       // Update stats
       await this.updateStats();
 
-      logger.debug("✅ TaskGroup: Task completed", {
+      logger.info("✅ TaskGroup: Task completed", {
         file: "taskGroup.ts",
         function: "completeTask",
         taskId,

@@ -99,23 +99,51 @@ export function task(options: TaskOptions = {}): MethodDecorator {
 
         taskId = taskOptions.id;
 
-        const task = await queueManager.addTask(
-          methodName,
-          {
-            args,
-            context: this,
-          },
-          taskOptions
-        );
-
+        // Handle group tasks differently from regular tasks
         if (taskOptions.group) {
-          const group = await queueManager.getGroup(taskOptions.group);
-          await group.addTask(methodName, taskOptions, {
+          // For group tasks, use QueueManager's addTaskToGroup method
+          await queueManager.addTaskToGroup(methodName, taskOptions, {
             args,
             context: this,
           });
 
+          // In client mode, group tasks are processed on different machines
+          // so we don't wait for completion events - just return immediately
+          if (queueManager.isClientMode()) {
+            logger.info("🎯 Task Decorator: Group task submitted (client mode)", {
+              file: "task.ts",
+              function: methodName,
+              taskId,
+              group: taskOptions.group,
+            });
+            return Promise.resolve(undefined);
+          }
+
           return new Promise((resolve, reject) => {
+            const onCompleted = (
+              completedTaskId: string,
+              status: TaskStatus,
+              data: any
+            ) => {
+              if (!isSettled && completedTaskId === taskId) {
+                isSettled = true;
+                cleanup();
+                resolve(data?.result);
+              }
+            };
+
+            const onFailed = (
+              failedTaskId: string,
+              status: TaskStatus,
+              data: any
+            ) => {
+              if (!isSettled && failedTaskId === taskId) {
+                isSettled = true;
+                cleanup();
+                reject(data?.error || new Error("Task failed"));
+              }
+            };
+
             timeoutId = setTimeout(() => {
               if (!isSettled) {
                 isSettled = true;
@@ -125,43 +153,13 @@ export function task(options: TaskOptions = {}): MethodDecorator {
             }, taskOptions.timeout);
 
             const cleanup = () => {
-              if (taskId) {
-                queueManager.offTaskEvent(ObserverEvent.TASK_COMPLETED);
-                queueManager.offTaskEvent(ObserverEvent.TASK_FAILED);
-              }
+              queueManager.offTaskEvent(ObserverEvent.TASK_COMPLETED, onCompleted);
+              queueManager.offTaskEvent(ObserverEvent.TASK_FAILED, onFailed);
               clearTimeout(timeoutId);
             };
 
-            // Let TaskGroup handle the completion
-            queueManager.onTaskEvent(
-              ObserverEvent.TASK_COMPLETED,
-              (completedTaskId: string, status: TaskStatus, data: any) => {
-                if (!isSettled && completedTaskId === taskId) {
-                  isSettled = true;
-                  cleanup();
-                  resolve(data?.result);
-                }
-              }
-            );
-
-            // Let TaskGroup handle the failure
-            queueManager.onTaskEvent(
-              ObserverEvent.TASK_FAILED,
-              (failedTaskId: string, status: TaskStatus, data: any) => {
-                console.log("🔥 Task Decorator: Task failed", {
-                  file: "task.ts",
-                  function: methodName,
-                  failedTaskId,
-                  status,
-                  data: JSON.stringify(data),
-                });
-                if (!isSettled && failedTaskId === taskId) {
-                  isSettled = true;
-                  cleanup();
-                  reject(data?.error || new Error("Task failed"));
-                }
-              }
-            );
+            queueManager.onTaskEvent(ObserverEvent.TASK_COMPLETED, onCompleted);
+            queueManager.onTaskEvent(ObserverEvent.TASK_FAILED, onFailed);
 
             // Handle cancellation through TaskGroup
             if (
@@ -171,9 +169,12 @@ export function task(options: TaskOptions = {}): MethodDecorator {
               const signal = args[0] as AbortSignal;
 
               if (signal.aborted) {
-                cleanup();
-                group.stopProcessing().catch(logger.error);
-                reject(new Error("Task was cancelled"));
+                if (!isSettled) {
+                  isSettled = true;
+                  cleanup();
+                  queueManager.getGroup(taskOptions.group).stopProcessing().catch(logger.error);
+                  reject(new Error("Task was cancelled"));
+                }
                 return;
               }
 
@@ -183,7 +184,7 @@ export function task(options: TaskOptions = {}): MethodDecorator {
                   if (!isSettled) {
                     isSettled = true;
                     cleanup();
-                    await group.stopProcessing();
+                    await queueManager.getGroup(taskOptions.group).stopProcessing();
                     reject(new Error("Task was cancelled"));
                   }
                 },
@@ -191,9 +192,18 @@ export function task(options: TaskOptions = {}): MethodDecorator {
               );
             }
           });
+        } else {
+          // For regular (non-group) tasks, add directly to queue
+          const task = await queueManager.addTask(
+            methodName,
+            {
+              args,
+              context: this,
+            },
+            taskOptions
+          );
+          return task.result;
         }
-
-        return task.result;
       } catch (error) {
         const executionTime = Date.now() - startTime;
         logger.error("❌ Task Decorator: Task execution failed", {
@@ -205,10 +215,6 @@ export function task(options: TaskOptions = {}): MethodDecorator {
           group: options.group,
         });
 
-        if (taskId) {
-          queueManager.offTaskEvent(ObserverEvent.TASK_COMPLETED);
-          queueManager.offTaskEvent(ObserverEvent.TASK_FAILED);
-        }
         clearTimeout(timeoutId);
         throw error;
       }

@@ -37,6 +37,8 @@ export class QueueManager {
   public deadLetterQueue: DeadLetterQueue;
   private metrics: QueueMetrics;
   private healthCheckInterval: NodeJS.Timeout | null = null;
+  private metricsInterval: NodeJS.Timeout | null = null;
+  private initializingQueues: Set<string> = new Set();
   private shouldCreateWorkers: boolean = true;
   private workerConfig: WorkerConfig = {};
 
@@ -64,7 +66,6 @@ export class QueueManager {
       ...queueOptions,
     };
 
-    console.log("🔍 About to call initializeQueue");
     this.workerConfig = workerOptions;
     this.initializeQueue(
       defaultQueueName,
@@ -73,7 +74,6 @@ export class QueueManager {
       this.instanceId,
       createWorkers
     );
-    console.log("🔍 initializeQueue completed");
     this.observer = new TaskObserver(this.redis);
     this.groups = new Map();
     this.deadLetterQueue = new DeadLetterQueue(
@@ -230,12 +230,8 @@ export class QueueManager {
     this.queueEvents.set(queueName, queueEvents);
 
     // Only create workers if requested
-    console.log("🔍 Debug initializeQueue:", { queueName, createWorkers, shouldCreateWorkers: this.shouldCreateWorkers });
     if (createWorkers) {
-      console.log("🔧 Creating worker for queue:", queueName);
       this.initializeWorker(queueName, workerOptions, instanceId);
-    } else {
-      console.log("⏭️ Skipping worker creation for queue:", queueName);
     }
   }
 
@@ -324,7 +320,7 @@ export class QueueManager {
 
   private async startQueueMetricsCollection() {
     // Collect metrics every minute
-    setInterval(async () => {
+    this.metricsInterval = setInterval(async () => {
       for (const [queueName, queue] of this.queues) {
         try {
           const counts = await queue.getJobCounts();
@@ -392,9 +388,22 @@ export class QueueManager {
     let queue = this.queues.get(queueName);
 
     if (!queue) {
-      await this.initializeQueue(queueName, {
-        connection: this.redis.options,
-      }, this.workerConfig, this.instanceId, this.shouldCreateWorkers);
+      // Guard against concurrent first-use: only one initializeQueue per queue
+      // name at a time, and reuse the in-flight result if already started.
+      if (this.initializingQueues.has(queueName)) {
+        while (this.initializingQueues.has(queueName)) {
+          await new Promise((r) => setTimeout(r, 25));
+        }
+      } else {
+        this.initializingQueues.add(queueName);
+        try {
+          await this.initializeQueue(queueName, {
+            connection: this.redis.options,
+          }, this.workerConfig, this.instanceId, this.shouldCreateWorkers);
+        } finally {
+          this.initializingQueues.delete(queueName);
+        }
+      }
       queue = this.queues.get(queueName);
     }
 
@@ -561,9 +570,17 @@ export class QueueManager {
       };
 
       group = new TaskGroup(this.redis, config);
-      const worker = this.shouldCreateWorkers ? this.workers.get(config.name) || null : null;
+      // For groups, find any available worker (typically "default" queue worker)
+      const worker = this.shouldCreateWorkers ? 
+        this.workers.get("default") || Array.from(this.workers.values())[0] || null : 
+        null;
       group.connect(this, worker);
       this.groups.set(groupName, group);
+      
+      // Only start processing if we have workers (worker mode)
+      if (this.shouldCreateWorkers) {
+        await group.startProcessing();
+      }
     }
 
     return group;
@@ -579,10 +596,60 @@ export class QueueManager {
       throw new Error("Group name is required for group tasks");
     }
 
-    const group = await this.getGroup(groupName);
-    await group.addTask(methodName, taskOptions, taskData);
-    group.startProcessing();
-    return;
+    // In client mode, just add the task to group structures in Redis
+    // The worker-side TaskGroup will pick it up and process it
+    if (!this.shouldCreateWorkers) {
+      // Client mode: directly add to Redis group structures
+      const groupKey = `group:${groupName}:tasks`;
+      const stateKey = `group:${groupName}:state`;
+      const processingOrderKey = `group:${groupName}:order`;
+      
+      const { id: taskId, weight = 1 } = taskOptions;
+      if (!taskId) {
+        throw new Error("Task ID is required");
+      }
+
+      // Add to group structures
+      await this.redis.sadd(groupKey, taskId);
+
+      // Use the same priority source as worker-mode TaskGroup so client and
+      // worker compute identical order scores.
+      const groupPriority = await this.getGroupPriority(groupName);
+      const timestamp = Date.now();
+      const priorityScore = groupPriority * 1000000000000;
+      const weightScore = weight * 10000000000;
+      const orderScore = priorityScore + weightScore + timestamp;
+
+      await this.redis.zadd(processingOrderKey, orderScore.toString(), taskId);
+      await this.redis.hset(stateKey, taskId, "waiting");
+
+      // Store task details
+      await this.redis.hset(`${groupKey}:tasks:${taskId}`, {
+        method: methodName,
+        data: JSON.stringify(taskData),
+        options: JSON.stringify(taskOptions),
+      });
+
+      // 🔔 NOTIFY WORKERS: Publish task addition event
+      await this.redis.publish(`group:${groupName}:new-task`, JSON.stringify({
+        taskId,
+        groupName,
+        methodName,
+        timestamp: Date.now()
+      }));
+
+      logger.info("📤 QueueManager: Task added to group in client mode", {
+        file: "queueManager.ts",
+        function: "addTaskToGroup",
+        taskId,
+        groupName,
+        methodName,
+      });
+    } else {
+      // Worker mode: use TaskGroup instance
+      const group = await this.getGroup(groupName);
+      await group.addTask(methodName, taskOptions, taskData);
+    }
   }
 
   async ensureTaskInQueue(task: Task, queueName: string): Promise<void> {
@@ -593,9 +660,25 @@ export class QueueManager {
 
     const existingJob = await queue.getJob(task.id);
     if (!existingJob) {
-      await queue.add(task.name, task.data, {
+      const job = await queue.add(task.name, task.data, {
         jobId: task.id,
         ...task.options,
+      });
+      
+      logger.info("📤 QueueManager: Task added to BullMQ queue", {
+        file: "queueManager.ts",
+        function: "ensureTaskInQueue",
+        taskId: task.id,
+        taskName: task.name,
+        queueName,
+        jobId: job.id,
+      });
+    } else {
+      logger.debug("📋 QueueManager: Task already exists in queue", {
+        file: "queueManager.ts",
+        function: "ensureTaskInQueue",
+        taskId: task.id,
+        queueName,
       });
     }
   }
@@ -615,8 +698,16 @@ export class QueueManager {
     this.observer.subscribe(event, callback);
   }
 
-  offTaskEvent(event: ObserverEvent): void {
-    this.observer.unsubscribe(event);
+  offTaskEvent(event: ObserverEvent, callback?: TaskObserverCallback): void {
+    this.observer.unsubscribe(event, callback);
+  }
+
+  emitTaskEvent(event: ObserverEvent, taskId: string, status: TaskStatus, data: any): void {
+    this.observer.notify(event, taskId, status, data);
+  }
+
+  isClientMode(): boolean {
+    return !this.shouldCreateWorkers;
   }
 
   private setupTaskObservers(): void {
@@ -703,7 +794,15 @@ export class QueueManager {
   }
 
   async close(): Promise<void> {
+    this.stopHealthCheck();
+    if (this.metricsInterval) {
+      clearInterval(this.metricsInterval);
+      this.metricsInterval = null;
+    }
     await this.observer.close();
+    await Promise.all(
+      Array.from(this.workers.values()).map((worker) => worker.close())
+    );
     await Promise.all(
       Array.from(this.queues.values()).map((queue) => queue.close())
     );

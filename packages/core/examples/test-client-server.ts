@@ -20,10 +20,10 @@ try {
 
   console.log("✅ Client configured successfully");
   console.log("✅ Client mode enabled:", client.isClientModeEnabled());
-  
+
   // Test scheduling a task
   const queueManager = client.getQueueManager();
-  
+
   // Create the test queue first (client mode)
   await queueManager.createQueue("test", {
     connection: {
@@ -31,7 +31,7 @@ try {
       port: 6379,
     },
   }, false); // Don't create workers in client mode
-  
+
   const task = await queueManager.addTask(
     "test-task",
     { message: "Hello from client!" },
@@ -41,7 +41,7 @@ try {
     }
   );
   console.log("✅ Task scheduled:", task.id);
-  
+
 } catch (error) {
   console.error("❌ Client test failed:", error);
 }
@@ -61,7 +61,7 @@ try {
 
   console.log("✅ Worker configured successfully");
   console.log("✅ Worker mode enabled:", worker.isWorkerModeEnabled());
-  
+
   // Create the test queue first (worker mode)
   const workerQueueManager = worker.getQueueManager();
   await workerQueueManager.createQueue("test", {
@@ -70,19 +70,21 @@ try {
       port: 6379,
     },
   }, true); // Create workers in worker mode
-  
+
   // Register a simple task handler
   worker.registerTaskHandler("test-task", async (data) => {
     console.log("🎯 Processing task:", data);
     return { success: true, message: data.message };
   }, "test");
-  
+
   console.log("✅ Task handler registered");
-  
+
   // Get worker status
   const status = await worker.getWorkerStatus("test");
   console.log("✅ Worker status:", status?.status);
-  
+
+  await worker.startProcessing()
+
 } catch (error) {
   console.error("❌ Worker test failed:", error);
 }

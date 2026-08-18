@@ -190,8 +190,10 @@ export class ResultCache {
   }
 
   async close(): Promise<void> {
-    if (this.redis) {
-      await this.redis.quit();
-    }
+    // The Redis instance is a shared singleton owned by redisConnection.
+    // Quitting it here would close the connection for every other consumer.
+    // Intentionally a no-op; connection lifecycle is managed by redisConnection.
+    logger.debug('File: resultCache.ts', '👋', 'close', 'note',
+      'ResultCache holds a shared Redis connection; not quitting it here');
   }
 } 

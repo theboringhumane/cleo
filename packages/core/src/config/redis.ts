@@ -85,6 +85,29 @@ export class RedisConnection {
     }
     return connection;
   }
+
+  /**
+   * Close a specific instance's Redis connection and remove it from the map.
+   * Safe to call multiple times.
+   */
+  async closeInstance(instanceId: RedisInstance | string = RedisInstance.DEFAULT): Promise<void> {
+    const connection = this.connections.get(instanceId);
+    if (connection) {
+      this.connections.delete(instanceId);
+      try {
+        await connection.quit();
+      } catch {
+        connection.disconnect();
+      }
+    }
+  }
+
+  /**
+   * Close all Redis connections.
+   */
+  async closeAll(): Promise<void> {
+    await Promise.all([...this.connections.keys()].map((id) => this.closeInstance(id)));
+  }
 }
 
 export const redisConnection = new RedisConnection();

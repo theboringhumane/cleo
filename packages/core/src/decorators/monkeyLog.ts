@@ -3,100 +3,57 @@ import { WORKER_KEY } from "../constants";
 
 export function MonkeyCapture(fn: Function) {
   return async (...args: any[]) => {
+    const job = args[0];
+    const workerId = args[1];
+    const instance = args[2];
+    const taskArgs = args.slice(3);
+
+    const redis = redisConnection.getInstance(instance);
+    const taskHistoryKey = `${WORKER_KEY}:${workerId}:task:${job.id}:logs`;
+
+    const logEntry = (message: string, data?: any) => {
+      redis.lpush(
+        taskHistoryKey,
+        JSON.stringify({
+          timestamp: new Date().toISOString(),
+          level: "info",
+          message,
+          functionArgs: data,
+        })
+      ).catch(() => {});
+    };
+
+    logEntry("parameters", taskArgs);
+
+    const fnSource = fn.toString();
+    const internalFunctions = fnSource.match(/function\s+(\w+)\s*\(/g);
+    logEntry("internalFunctions", internalFunctions);
+
+    const internalVariables = fnSource.match(/(var|const|let)\s+(\w+)\s*=/g);
+    logEntry("internalVariables", internalVariables);
 
     const originalConsoleLog = console.log;
     const originalFetch = global.fetch;
 
-    // job is a arg and workerId also
-    const job = args[0];
-    const workerId = args[1];
-    const instance = args[2];
-    const promise = fn(args[3]);
-
-    const redis = redisConnection.getInstance(instance);
-
-    const taskHistoryKey = `${WORKER_KEY}:${workerId}:task:${job.id}:logs`;
-
-    const parameters = args[3];
-
-    redis.lpush(
-      taskHistoryKey,
-      JSON.stringify({
-        timestamp: new Date().toISOString(),
-        level: "info",
-        message: "parameters",
-        functionArgs: parameters,
-      })
-    );
-
-    // grep all the internal functions inside the wrapped function
-    const internalFunctions = fn.toString().match(/function\s+(\w+)\s*\(/g);
-
-    redis.lpush(
-      taskHistoryKey,
-      JSON.stringify({
-        timestamp: new Date().toISOString(),
-        level: "info",
-        message: "internalFunctions",
-        functionArgs: internalFunctions,
-      })
-    );
-
-    // we need to get all the internal variables inside the wrapped function
-    const internalVariables = fn
-      .toString()
-      .match(/(var|const|let)\s+(\w+)\s*=/g);
-
-    redis.lpush(
-      taskHistoryKey,
-      JSON.stringify({
-        timestamp: new Date().toISOString(),
-        level: "info",
-        message: "internalVariables",
-        functionArgs: internalVariables,
-      })
-    );
-
     console.log = function (...logArgs: any[]) {
-      redis.lpush(
-        taskHistoryKey,
-        JSON.stringify({
-          timestamp: new Date().toISOString(),
-          level: "info",
-          message: logArgs.join(" "),
-          functionArgs: args, // Log the parameters passed to the function
-        })
-      );
+      logEntry(logArgs.join(" "), taskArgs);
       originalConsoleLog.apply(console, logArgs);
     };
 
-    // logs fetch as well
     global.fetch = async (
       input: string | URL | globalThis.Request,
       init?: RequestInit
     ) => {
-      redis.lpush(
-        taskHistoryKey,
-        JSON.stringify({
-          timestamp: new Date().toISOString(),
-          level: "info",
-          message: "fetch",
-          functionArgs: JSON.stringify([input, init]),
-        })
-      );
+      logEntry("fetch", JSON.stringify([String(input), init]));
       return originalFetch(input, init);
     };
 
-    let result;
     try {
-      if (promise instanceof Promise) {
-        result = await promise;
-      } else {
-        result = promise;
-      }
+      const result = fn(...taskArgs);
+      return result instanceof Promise ? await result : result;
     } finally {
-      console.log = originalConsoleLog; // Restore original console.log
+      console.log = originalConsoleLog;
+      global.fetch = originalFetch;
     }
-    return result;
   };
 }

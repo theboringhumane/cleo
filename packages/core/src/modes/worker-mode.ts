@@ -4,6 +4,7 @@ import { logger } from "../utils/logger";
 import { WorkerConfig } from "../types/interfaces";
 import { RedisInstance } from "../config/redis";
 import { redisConnection } from "../config/redis";
+import type { Redis } from "ioredis";
 
 /**
  * Worker mode for Cleo - processes jobs from Redis queues
@@ -16,6 +17,8 @@ export class CleoWorker {
   private readonly instanceId: RedisInstance;
   private isWorkerMode = true;
   private workers: Map<string, Worker> = new Map();
+  private processedGroups: Set<string> = new Set();
+  private globalGroupSubscriber: Redis | null = null;
 
   constructor(instanceId: RedisInstance = RedisInstance.DEFAULT) {
     this.instanceId = instanceId;
@@ -168,15 +171,138 @@ export class CleoWorker {
 
     const queueManager = this.getQueueManager();
     const allWorkers = await queueManager.getAllWorkers();
-    
+
     logger.info("🚀 CleoWorker: Starting job processing", {
       file: "worker-mode.ts",
       function: "startProcessing",
       workerCount: allWorkers.length,
     });
 
+    // Discover and start processing existing groups
+    await this.discoverAndProcessGroups();
+
+    // Start global group notification listener
+    await this.startGlobalGroupListener();
+
     // Workers are automatically started when created
     // This method can be used for additional setup if needed
+  }
+
+  private async startGlobalGroupListener(): Promise<void> {
+    try {
+      // Duplicate the configured connection (preserves host/port/password/db).
+      // A subscriber connection cannot be shared with normal commands.
+      const subscriber = redisConnection.getInstance(this.instanceId).duplicate();
+      this.globalGroupSubscriber = subscriber;
+      
+      // Subscribe to all group notifications
+      await subscriber.psubscribe("group:*:new-task");
+      
+      subscriber.on("pmessage", async (pattern, channel, message) => {
+        try {
+          const data = JSON.parse(message);
+          const groupName = data.groupName;
+          
+          logger.info("🔔 CleoWorker: Received global group notification", {
+            file: "worker-mode.ts",
+            function: "startGlobalGroupListener",
+            groupName,
+            taskId: data.taskId,
+            methodName: data.methodName,
+          });
+          
+          // Ensure the group exists and is processing
+          await this.ensureGroupExists(groupName);
+        } catch (error) {
+          logger.error("❌ CleoWorker: Error handling global group notification", {
+            file: "worker-mode.ts",
+            function: "startGlobalGroupListener",
+            error
+          });
+        }
+      });
+
+      logger.info("🔔 CleoWorker: Started global group listener", {
+        file: "worker-mode.ts",
+        function: "startGlobalGroupListener",
+      });
+    } catch (error) {
+      logger.error("❌ CleoWorker: Failed to start global group listener", {
+        file: "worker-mode.ts",
+        function: "startGlobalGroupListener",
+        error
+      });
+    }
+  }
+
+  /**
+   * Discover existing groups in Redis and start processing them
+   */
+  private async discoverAndProcessGroups(): Promise<void> {
+    try {
+      const queueManager = this.getQueueManager();
+      const groupNames = await queueManager.getAllGroups();
+
+      logger.info("🔍 CleoWorker: Discovering groups", {
+        file: "worker-mode.ts",
+        function: "discoverAndProcessGroups",
+        groupCount: groupNames.length,
+        groups: groupNames,
+      });
+
+      // Start processing each discovered group
+      for (const groupName of groupNames) {
+        const group = await queueManager.getGroup(groupName);
+        
+        // Mark group as being processed
+        this.processedGroups.add(groupName);
+        
+        logger.info("🎯 CleoWorker: Starting group processing", {
+          file: "worker-mode.ts",
+          function: "discoverAndProcessGroups",
+          groupName,
+        });
+      }
+    } catch (error) {
+      logger.error("❌ CleoWorker: Failed to discover groups", {
+        file: "worker-mode.ts",
+        function: "discoverAndProcessGroups",
+        error,
+      });
+    }
+  }
+
+  private async ensureGroupExists(groupName: string): Promise<void> {
+    try {
+      // Check if group is already being processed
+      if (this.processedGroups.has(groupName)) {
+        logger.info("⏭️ CleoWorker: Group already being processed", {
+          file: "worker-mode.ts",
+          function: "ensureGroupExists",
+          groupName,
+        });
+        return;
+      }
+
+      const queueManager = this.getQueueManager();
+      const group = await queueManager.getGroup(groupName);
+      
+      // Mark group as being processed
+      this.processedGroups.add(groupName);
+      
+      logger.info("🎯 CleoWorker: Ensured group exists", {
+        file: "worker-mode.ts",
+        function: "ensureGroupExists",
+        groupName,
+      });
+    } catch (error) {
+      logger.error("❌ CleoWorker: Failed to ensure group exists", {
+        file: "worker-mode.ts",
+        function: "ensureGroupExists",
+        groupName,
+        error,
+      });
+    }
   }
 
   /**
@@ -184,7 +310,7 @@ export class CleoWorker {
    */
   async stopProcessing(): Promise<void> {
     const queueManager = this.getQueueManager();
-    
+
     // Close all workers
     for (const [queueName, worker] of this.workers) {
       await worker.close();
@@ -194,13 +320,47 @@ export class CleoWorker {
         queueName,
       });
     }
-
     this.workers.clear();
-    
+
+    // Close the global group pub/sub listener connection
+    if (this.globalGroupSubscriber) {
+      try {
+        await this.globalGroupSubscriber.punsubscribe("group:*:new-task");
+        await this.globalGroupSubscriber.quit();
+      } catch {
+        this.globalGroupSubscriber.disconnect();
+      } finally {
+        this.globalGroupSubscriber = null;
+      }
+    }
+
+    // Close QueueManager (clears intervals, closes queues/events/DLQ)
+    await queueManager.close();
+
     logger.info("🛑 CleoWorker: All workers stopped", {
       file: "worker-mode.ts",
       function: "stopProcessing",
     });
+  }
+
+  /**
+   * Full shutdown: stop processing and release the Redis instance connection.
+   */
+  async shutdown(): Promise<void> {
+    try {
+      await this.stopProcessing();
+    } catch (error) {
+      logger.error("❌ CleoWorker: Error during shutdown", {
+        file: "worker-mode.ts",
+        function: "shutdown",
+        error,
+      });
+    }
+    await redisConnection.closeInstance(this.instanceId);
+
+    // Allow re-creation via getInstance() after a full shutdown.
+    CleoWorker.instances.delete(this.instanceId);
+    this.isConfigured = false;
   }
 
   /**
